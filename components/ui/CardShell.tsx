@@ -1,5 +1,5 @@
 import React from 'react';
-import { Card as CardType } from '../../types';
+import { AppLanguage, Card as CardType } from '../../types';
 import {
   MoreVertical,
   RefreshCw,
@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useStore } from '../../store';
 import { Button } from './Button';
+import { t } from '../../i18n';
 
 interface CardShellProps {
   card: CardType;
@@ -24,9 +25,9 @@ interface CardShellProps {
   onEdit?: () => void;
 }
 
-const formatTime = (value?: number) => {
-  if (!value) return 'Never';
-  return new Date(value).toLocaleString();
+const formatTime = (value: number | undefined, language: AppLanguage, neverText: string) => {
+  if (!value) return neverText;
+  return new Date(value).toLocaleString(language);
 };
 
 export const CardShell: React.FC<CardShellProps> = ({
@@ -39,8 +40,9 @@ export const CardShell: React.FC<CardShellProps> = ({
   onRefresh,
   onEdit,
 }) => {
-  const { softDeleteCard } = useStore();
+  const { softDeleteCard, language } = useStore();
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const tr = (key: string) => t(language, key);
 
   const width = card.ui_config.size.startsWith('2') ? 2 : 1;
   const height = card.ui_config.size.endsWith('2') ? 2 : 1;
@@ -129,7 +131,7 @@ export const CardShell: React.FC<CardShellProps> = ({
                     setMenuOpen(false);
                   }}
                 >
-                  <RefreshCw size={12} className="mr-2" /> Refresh
+                  <RefreshCw size={12} className="mr-2" /> {tr('cardShell.refresh')}
                 </button>
                 <button
                   className="flex w-full items-center rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground"
@@ -138,7 +140,7 @@ export const CardShell: React.FC<CardShellProps> = ({
                     setMenuOpen(false);
                   }}
                 >
-                  <Settings size={12} className="mr-2" /> Edit
+                  <Settings size={12} className="mr-2" /> {tr('cardShell.edit')}
                 </button>
                 <button
                   onClick={() => {
@@ -147,7 +149,7 @@ export const CardShell: React.FC<CardShellProps> = ({
                   }}
                   className="flex w-full items-center rounded-sm px-2 py-1.5 text-xs text-red-500 hover:bg-red-950/20"
                 >
-                  <Trash2 size={12} className="mr-2" /> Delete
+                  <Trash2 size={12} className="mr-2" /> {tr('cardShell.delete')}
                 </button>
               </div>
             )}
@@ -165,10 +167,10 @@ export const CardShell: React.FC<CardShellProps> = ({
           <div className="text-destructive text-sm flex flex-col items-start justify-center h-full gap-2">
             <div className="flex items-center gap-2">
               <CircleAlert size={18} />
-              <p className="font-medium">Execution Error</p>
+              <p className="font-medium">{tr('cardShell.executionError')}</p>
             </div>
             <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3">
-              {card.runtimeData?.error || '脚本执行失败'}
+              {card.runtimeData?.error || tr('cardShell.scriptExecutionFailed')}
             </p>
             {card.runtimeData?.stderr && (
               <p className="text-[11px] text-muted-foreground line-clamp-2">stderr: {card.runtimeData.stderr}</p>
@@ -181,10 +183,14 @@ export const CardShell: React.FC<CardShellProps> = ({
 
       {!isEditMode && (
         <div className="px-4 pb-3 flex items-center justify-between text-[11px] text-muted-foreground/90">
-          <div className="inline-flex items-center gap-1">
-            {isLoading ? <RefreshCw size={12} className="animate-spin" /> : <Clock3 size={12} />}
-            <span>{isLoading ? 'Refreshing...' : formatTime(card.runtimeData?.lastUpdated)}</span>
-          </div>
+        <div className="inline-flex items-center gap-1">
+          {isLoading ? <RefreshCw size={12} className="animate-spin" /> : <Clock3 size={12} />}
+          <span>
+            {isLoading
+              ? tr('cardShell.refreshing')
+              : formatTime(card.runtimeData?.lastUpdated, language, tr('cardShell.never'))}
+          </span>
+        </div>
           {card.runtimeData?.state === 'error' && <AlertCircle size={12} className="text-destructive" />}
         </div>
       )}

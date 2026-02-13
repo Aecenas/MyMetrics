@@ -1,5 +1,6 @@
 import { BaseDirectory, readTextFile, writeTextFile, mkdir, exists } from '@tauri-apps/plugin-fs';
-import { AppSettings, Card, MappingConfig, RefreshConfig } from '../types';
+import { AppLanguage, AppSettings, Card, MappingConfig, RefreshConfig } from '../types';
+import { t } from '../i18n';
 
 const POINTER_FILENAME = 'storage_config.json';
 const DATA_FILENAME = 'user_settings.json';
@@ -11,6 +12,11 @@ interface StorageConfig {
 }
 
 const isTauri = () => typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
+const getLanguage = (): AppLanguage =>
+  typeof document !== 'undefined' && document.documentElement.lang === 'zh-CN' ? 'zh-CN' : 'en-US';
+const tr = (key: string) => t(getLanguage(), key);
+
+const normalizeLanguage = (value: unknown): AppLanguage => (value === 'zh-CN' ? 'zh-CN' : 'en-US');
 
 const defaultRefreshConfig: RefreshConfig = {
   interval_sec: 0,
@@ -163,6 +169,7 @@ const migrateToV1 = (input: any): AppSettings => {
   return {
     schema_version: SCHEMA_VERSION,
     theme: input?.theme === 'light' ? 'light' : 'dark',
+    language: normalizeLanguage(input?.language),
     activeGroup: typeof input?.activeGroup === 'string' ? input.activeGroup : 'All',
     cards,
     default_python_path:
@@ -186,8 +193,9 @@ const sanitizeForSave = (settings: AppSettings): AppSettings => {
 
   return {
     schema_version: SCHEMA_VERSION,
-    theme: settings.theme,
-    activeGroup: settings.activeGroup,
+    theme: settings.theme === 'light' ? 'light' : 'dark',
+    language: normalizeLanguage((settings as Partial<AppSettings>).language),
+    activeGroup: typeof settings.activeGroup === 'string' ? settings.activeGroup : 'All',
     default_python_path: settings.default_python_path,
     cards,
   };
@@ -216,7 +224,7 @@ const resolveDataPath = async (): Promise<{ path: string; baseDir?: BaseDirector
 
 export const storageService = {
   async getCurrentDataPath(): Promise<string> {
-    if (!isTauri()) return 'Browser Memory';
+    if (!isTauri()) return tr('storage.path.browser');
 
     try {
       if (await exists(POINTER_FILENAME, { baseDir: BaseDirectory.AppLocalData })) {
@@ -224,9 +232,9 @@ export const storageService = {
         const config = JSON.parse(content) as StorageConfig;
         if (config.customPath) return config.customPath;
       }
-      return 'Default (App Data Folder)';
+      return tr('storage.path.default');
     } catch {
-      return 'Default (App Data Folder)';
+      return tr('storage.path.default');
     }
   },
 

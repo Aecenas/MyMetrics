@@ -3,17 +3,21 @@ import { useStore } from '../store';
 import { Moon, Sun, Folder, RefreshCw, Info, TerminalSquare } from 'lucide-react';
 import { Button } from './ui/Button';
 import { open } from '@tauri-apps/plugin-dialog';
+import { t } from '../i18n';
 
 export const Settings = () => {
   const {
     theme,
     setTheme,
+    language,
+    setLanguage,
     dataPath,
     updateDataPath,
     defaultPythonPath,
     setDefaultPythonPath,
   } = useStore();
   const [pythonPathInput, setPythonPathInput] = useState(defaultPythonPath ?? '');
+  const tr = (key: string) => t(language, key);
 
   useEffect(() => {
     setPythonPathInput(defaultPythonPath ?? '');
@@ -24,7 +28,7 @@ export const Settings = () => {
       const selected = await open({
         directory: true,
         multiple: false,
-        title: 'Select Data Folder',
+        title: tr('settings.selectDataFolder'),
       });
 
       if (selected) {
@@ -46,17 +50,17 @@ export const Settings = () => {
   return (
     <div className="p-8 max-w-5xl mx-auto animate-in fade-in duration-300">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold tracking-tight mb-2">Settings</h1>
-        <p className="text-muted-foreground">Manage application preferences.</p>
+        <h1 className="text-3xl font-bold tracking-tight mb-2">{tr('settings.title')}</h1>
+        <p className="text-muted-foreground">{tr('settings.description')}</p>
       </div>
 
       <div className="space-y-6">
         <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
-          <h2 className="text-lg font-medium mb-4">Appearance</h2>
-          <div className="flex items-center justify-between">
+          <h2 className="text-lg font-medium mb-4">{tr('settings.appearance')}</h2>
+          <div className="flex items-center justify-between gap-3">
             <div className="space-y-1">
-              <p className="font-medium">Theme</p>
-              <p className="text-sm text-muted-foreground">Select your preferred color scheme.</p>
+              <p className="font-medium">{tr('settings.theme')}</p>
+              <p className="text-sm text-muted-foreground">{tr('settings.themeDesc')}</p>
             </div>
             <div className="flex items-center bg-secondary/50 p-1 rounded-lg border border-border">
               <button
@@ -68,7 +72,7 @@ export const Settings = () => {
                 }`}
               >
                 <Sun size={16} />
-                <span>Light</span>
+                <span>{tr('settings.light')}</span>
               </button>
               <button
                 onClick={() => setTheme('dark')}
@@ -79,46 +83,64 @@ export const Settings = () => {
                 }`}
               >
                 <Moon size={16} />
-                <span>Dark</span>
+                <span>{tr('settings.dark')}</span>
               </button>
             </div>
+          </div>
+
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <div className="space-y-1">
+              <p className="font-medium">{tr('settings.language')}</p>
+              <p className="text-sm text-muted-foreground">{tr('settings.languageDesc')}</p>
+            </div>
+            <select
+              value={language}
+              onChange={(event) => setLanguage(event.target.value as 'en-US' | 'zh-CN')}
+              className="bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <option value="en-US">{tr('settings.languageEnglish')}</option>
+              <option value="zh-CN">{tr('settings.languageChinese')}</option>
+            </select>
           </div>
         </div>
 
         <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
-          <h2 className="text-lg font-medium mb-4">Storage</h2>
+          <h2 className="text-lg font-medium mb-4">{tr('settings.storage')}</h2>
           <div className="space-y-4">
             <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
               <div>
-                <p className="font-medium">Data Location</p>
-                <p className="text-sm text-muted-foreground">Where your metrics configuration is stored.</p>
+                <p className="font-medium">{tr('settings.dataLocation')}</p>
+                <p className="text-sm text-muted-foreground">{tr('settings.dataLocationDesc')}</p>
               </div>
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={handleChooseFolder}>
-                  <Folder size={14} className="mr-2" /> Change Folder
+                  <Folder size={14} className="mr-2" /> {tr('settings.changeFolder')}
                 </Button>
-                <Button variant="ghost" size="sm" onClick={handleResetDefault} title="Reset to Default">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleResetDefault}
+                  title={tr('settings.resetToDefault')}
+                >
                   <RefreshCw size={14} />
                 </Button>
               </div>
             </div>
             <div className="bg-secondary/20 p-3 rounded-md border border-border/50 font-mono text-xs text-muted-foreground break-all">
-              {dataPath}
+              {dataPath || tr('common.loading')}
             </div>
             <div className="text-xs text-amber-500/80">
-              Note: Changing this will move your existing <code>user_settings.json</code> to the new location.
+              {tr('settings.pathChangeNote')}
             </div>
           </div>
         </div>
 
         <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
-          <h2 className="text-lg font-medium mb-4">Python Runtime</h2>
+          <h2 className="text-lg font-medium mb-4">{tr('settings.pythonRuntime')}</h2>
           <div className="space-y-4">
             <div className="space-y-2">
-              <p className="font-medium">Default Interpreter Path (Optional)</p>
-              <p className="text-sm text-muted-foreground">
-                留空时按系统默认命令解析（macOS/Linux: <code>python3</code>，Windows: <code>python</code>/<code>py -3</code>）。
-              </p>
+              <p className="font-medium">{tr('settings.defaultInterpreterPath')}</p>
+              <p className="text-sm text-muted-foreground">{tr('settings.defaultInterpreterDesc')}</p>
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -127,24 +149,24 @@ export const Settings = () => {
                   placeholder="e.g. /usr/bin/python3"
                   className="flex-1 bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
                 />
-                <Button onClick={savePythonPath}>Save</Button>
+                <Button onClick={savePythonPath}>{tr('common.save')}</Button>
               </div>
             </div>
 
             <div className="rounded-lg border border-border/60 bg-secondary/20 p-3 text-xs text-muted-foreground space-y-2">
               <div className="flex items-center gap-2 text-foreground">
                 <Info size={14} />
-                <span className="font-medium">Execution priority</span>
+                <span className="font-medium">{tr('settings.executionPriority')}</span>
               </div>
-              <p>1. Card-level interpreter path (if set)</p>
-              <p>2. Default interpreter path in settings (if set)</p>
-              <p>3. System default python command</p>
+              <p>{tr('settings.priorityCard')}</p>
+              <p>{tr('settings.priorityDefault')}</p>
+              <p>{tr('settings.prioritySystem')}</p>
             </div>
 
             <div className="rounded-lg border border-dashed border-border/70 p-3 text-xs text-muted-foreground flex items-start gap-2">
               <TerminalSquare size={14} className="mt-0.5" />
               <p>
-                脚本必须输出 JSON 到 STDOUT，格式：<code>{'{ "type": "scalar|series|status", "data": {...} }'}</code>
+                {tr('settings.scriptOutputFormat')}
               </p>
             </div>
           </div>

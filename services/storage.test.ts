@@ -50,6 +50,7 @@ describe('storage migration', () => {
     const migrated = storageMigration.migrateToV1(legacy);
 
     expect(migrated.schema_version).toBe(1);
+    expect(migrated.language).toBe('en-US');
     expect(migrated.activeGroup).toBe('Infrastructure');
     expect(migrated.cards).toHaveLength(1);
 

@@ -1,15 +1,19 @@
 import React from 'react';
 import { Card, ScriptOutputScalar } from '../../types';
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { useStore } from '../../store';
+import { t } from '../../i18n';
 
 interface ScalarCardProps {
   card: Card;
 }
 
 export const ScalarCard: React.FC<ScalarCardProps> = ({ card }) => {
+  const language = useStore((state) => state.language);
+  const tr = (key: string) => t(language, key);
   const data = card.runtimeData?.payload as ScriptOutputScalar | undefined;
 
-  if (!data) return <div className="text-sm text-muted-foreground">No Data</div>;
+  if (!data) return <div className="text-sm text-muted-foreground">{tr('common.noData')}</div>;
 
   const getColor = (status?: string) => {
     switch (status) {

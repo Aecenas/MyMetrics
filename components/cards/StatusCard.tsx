@@ -1,6 +1,8 @@
 import React from 'react';
 import { Card, ScriptOutputStatus } from '../../types';
 import { AlertCircle, AlertTriangle, CheckCircle2, HelpCircle } from 'lucide-react';
+import { useStore } from '../../store';
+import { t } from '../../i18n';
 
 interface StatusCardProps {
   card: Card;
@@ -21,10 +23,12 @@ const StatusIcon: React.FC<{ state: ScriptOutputStatus['state'] }> = ({ state })
 };
 
 export const StatusCard: React.FC<StatusCardProps> = ({ card }) => {
+  const language = useStore((state) => state.language);
+  const tr = (key: string) => t(language, key);
   const data = card.runtimeData?.payload as ScriptOutputStatus | undefined;
 
   if (!data) {
-    return <div className="text-sm text-muted-foreground">No Data</div>;
+    return <div className="text-sm text-muted-foreground">{tr('common.noData')}</div>;
   }
 
   const statusClass = statusStyleMap[data.state] ?? statusStyleMap.unknown;

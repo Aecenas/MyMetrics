@@ -1,6 +1,7 @@
 export type CardType = 'scalar' | 'series' | 'status';
 
 export type RuntimeState = 'idle' | 'loading' | 'success' | 'error';
+export type AppLanguage = 'en-US' | 'zh-CN';
 
 export interface ScriptConfig {
   path: string;
@@ -119,6 +120,7 @@ export interface Card {
 export interface AppSettings {
   schema_version: number;
   theme: 'dark' | 'light';
+  language: AppLanguage;
   activeGroup: string;
   cards: Card[];
   default_python_path?: string;

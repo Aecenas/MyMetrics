@@ -21,6 +21,7 @@ import { Button } from './ui/Button';
 import { useStore } from '../store';
 import { Card, CardType, MappingConfig, UIConfig } from '../types';
 import { executionService, ExecutionResult } from '../services/execution';
+import { t } from '../i18n';
 
 interface CreationWizardProps {
   onClose: () => void;
@@ -132,7 +133,8 @@ const createFormFromCard = (card: Card): WizardForm => ({
 });
 
 export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editingCard }) => {
-  const { cards, addCard, updateCard, refreshCard, defaultPythonPath } = useStore();
+  const { cards, addCard, updateCard, refreshCard, defaultPythonPath, language } = useStore();
+  const tr = (key: string, params?: Record<string, string | number>) => t(language, key, params);
 
   const [step, setStep] = useState(1);
   const [form, setForm] = useState<WizardForm>(defaultForm);
@@ -188,52 +190,52 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
   const validateStep = (targetStep: number): boolean => {
     if (targetStep === 1) {
       if (!form.title.trim()) {
-        setValidationMessage('请填写卡片标题');
+        setValidationMessage(tr('wizard.validation.titleRequired'));
         return false;
       }
       if (!form.group.trim()) {
-        setValidationMessage('请填写分组名称');
+        setValidationMessage(tr('wizard.validation.groupRequired'));
         return false;
       }
     }
 
     if (targetStep === 2) {
       if (!form.scriptPath.trim()) {
-        setValidationMessage('请填写 Python 脚本路径');
+        setValidationMessage(tr('wizard.validation.scriptPathRequired'));
         return false;
       }
       if (!form.scriptPath.trim().endsWith('.py')) {
-        setValidationMessage('脚本文件必须是 .py');
+        setValidationMessage(tr('wizard.validation.scriptExt'));
         return false;
       }
       if (form.intervalSec < 0) {
-        setValidationMessage('刷新间隔不能小于 0');
+        setValidationMessage(tr('wizard.validation.intervalMin'));
         return false;
       }
       if (form.timeoutMs < 1000) {
-        setValidationMessage('超时时间建议至少 1000ms');
+        setValidationMessage(tr('wizard.validation.timeoutMin'));
         return false;
       }
     }
 
     if (targetStep === 3) {
       if (form.type === 'scalar' && !form.scalarValueKey.trim()) {
-        setValidationMessage('scalar 类型必须设置 value key');
+        setValidationMessage(tr('wizard.validation.scalarValue'));
         return false;
       }
       if (form.type === 'series') {
         if (!form.seriesXAxisKey.trim() || !form.seriesKey.trim()) {
-          setValidationMessage('series 类型必须设置 x_axis key 与 series key');
+          setValidationMessage(tr('wizard.validation.seriesAxes'));
           return false;
         }
         if (!form.seriesNameKey.trim() || !form.seriesValuesKey.trim()) {
-          setValidationMessage('series 类型必须设置 name key 与 values key');
+          setValidationMessage(tr('wizard.validation.seriesFields'));
           return false;
         }
       }
       if (form.type === 'status') {
         if (!form.statusLabelKey.trim() || !form.statusStateKey.trim()) {
-          setValidationMessage('status 类型必须设置 label key 与 state key');
+          setValidationMessage(tr('wizard.validation.statusFields'));
           return false;
         }
       }
@@ -248,7 +250,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
       const selected = await open({
         directory: false,
         multiple: false,
-        title: 'Select Python Script',
+        title: tr('wizard.selectPythonScript'),
         filters: [{ name: 'Python', extensions: ['py'] }],
       });
 
@@ -403,11 +405,11 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
   const renderStepOne = () => (
     <div className="space-y-5 animate-in fade-in slide-in-from-right-4 duration-300">
       <div className="space-y-2">
-        <label className="text-sm font-medium">Card Title</label>
+        <label className="text-sm font-medium">{tr('wizard.cardTitle')}</label>
         <input
           type="text"
           className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-          placeholder="e.g. GPU Temp"
+          placeholder={tr('wizard.cardTitlePlaceholder')}
           value={form.title}
           onChange={(event) => updateForm('title', event.target.value)}
         />
@@ -415,13 +417,13 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <label className="text-sm font-medium">Group</label>
+          <label className="text-sm font-medium">{tr('wizard.group')}</label>
           <input
             list="wizard-group-options"
             className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
             value={form.group}
             onChange={(event) => updateForm('group', event.target.value)}
-            placeholder="Default"
+            placeholder={tr('wizard.groupPlaceholder')}
           />
           <datalist id="wizard-group-options">
             {groups.map((group) => (
@@ -431,7 +433,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
         </div>
 
         <div className="space-y-2">
-          <label className="text-sm font-medium">Size</label>
+          <label className="text-sm font-medium">{tr('wizard.size')}</label>
           <div className="flex gap-2">
             <button
               onClick={() => updateForm('size', '1x1')}
@@ -474,7 +476,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
       </div>
 
       <div className="space-y-2">
-        <label className="text-sm font-medium">Visualization Type</label>
+        <label className="text-sm font-medium">{tr('wizard.visualizationType')}</label>
         <div className="grid grid-cols-3 gap-4">
           <div
             className={`border rounded-lg p-4 cursor-pointer hover:bg-secondary/50 transition-colors ${
@@ -483,8 +485,8 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
             onClick={() => updateForm('type', 'scalar')}
           >
             <Binary className="mb-2 text-primary" />
-            <div className="font-medium">Scalar</div>
-            <div className="text-xs text-muted-foreground">Single value display</div>
+            <div className="font-medium">{tr('wizard.typeScalar')}</div>
+            <div className="text-xs text-muted-foreground">{tr('wizard.typeScalarDesc')}</div>
           </div>
           <div
             className={`border rounded-lg p-4 cursor-pointer hover:bg-secondary/50 transition-colors ${
@@ -493,8 +495,8 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
             onClick={() => updateForm('type', 'series')}
           >
             <BarChart3 className="mb-2 text-primary" />
-            <div className="font-medium">Series</div>
-            <div className="text-xs text-muted-foreground">Line or area chart</div>
+            <div className="font-medium">{tr('wizard.typeSeries')}</div>
+            <div className="text-xs text-muted-foreground">{tr('wizard.typeSeriesDesc')}</div>
           </div>
           <div
             className={`border rounded-lg p-4 cursor-pointer hover:bg-secondary/50 transition-colors ${
@@ -503,25 +505,25 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
             onClick={() => updateForm('type', 'status')}
           >
             <ShieldAlert className="mb-2 text-primary" />
-            <div className="font-medium">Status</div>
-            <div className="text-xs text-muted-foreground">Health / state badge</div>
+            <div className="font-medium">{tr('wizard.typeStatus')}</div>
+            <div className="text-xs text-muted-foreground">{tr('wizard.typeStatusDesc')}</div>
           </div>
         </div>
       </div>
 
       <div className="space-y-2">
-        <label className="text-sm font-medium">Color Theme</label>
+        <label className="text-sm font-medium">{tr('wizard.colorTheme')}</label>
         <select
           value={form.colorTheme}
           onChange={(event) => updateForm('colorTheme', event.target.value as UIConfig['color_theme'])}
           className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
         >
-          <option value="default">Default</option>
-          <option value="blue">Blue</option>
-          <option value="green">Green</option>
-          <option value="red">Red</option>
-          <option value="yellow">Yellow</option>
-          <option value="purple">Purple</option>
+          <option value="default">{tr('wizard.colorDefault')}</option>
+          <option value="blue">{tr('wizard.colorBlue')}</option>
+          <option value="green">{tr('wizard.colorGreen')}</option>
+          <option value="red">{tr('wizard.colorRed')}</option>
+          <option value="yellow">{tr('wizard.colorYellow')}</option>
+          <option value="purple">{tr('wizard.colorPurple')}</option>
         </select>
       </div>
     </div>
@@ -530,39 +532,39 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
   const renderStepTwo = () => (
     <div className="space-y-5 animate-in fade-in slide-in-from-right-4 duration-300">
       <div className="space-y-2">
-        <label className="text-sm font-medium">Python Script Path</label>
+        <label className="text-sm font-medium">{tr('wizard.pythonScriptPath')}</label>
         <div className="flex gap-2">
           <input
             type="text"
             className="flex-1 bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-            placeholder="/path/to/your/script.py"
+            placeholder={tr('wizard.pythonScriptPlaceholder')}
             value={form.scriptPath}
             onChange={(event) => updateForm('scriptPath', event.target.value)}
           />
           <Button variant="secondary" onClick={browseScriptFile}>
-            <FolderOpen size={14} className="mr-2" /> Browse
+            <FolderOpen size={14} className="mr-2" /> {tr('wizard.browse')}
           </Button>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <label className="text-sm font-medium">Script Args (space separated)</label>
+          <label className="text-sm font-medium">{tr('wizard.scriptArgs')}</label>
           <input
             type="text"
             className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-            placeholder="--city beijing"
+            placeholder={tr('wizard.scriptArgsPlaceholder')}
             value={form.scriptArgsText}
             onChange={(event) => updateForm('scriptArgsText', event.target.value)}
           />
         </div>
 
         <div className="space-y-2">
-          <label className="text-sm font-medium">Interpreter Path (optional)</label>
+          <label className="text-sm font-medium">{tr('wizard.interpreterPathOptional')}</label>
           <input
             type="text"
             className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-            placeholder="/usr/bin/python3"
+            placeholder={tr('wizard.interpreterPathPlaceholder')}
             value={form.pythonPath}
             onChange={(event) => updateForm('pythonPath', event.target.value)}
           />
@@ -571,7 +573,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <label className="text-sm font-medium">Refresh Interval (seconds, 0 = disabled)</label>
+          <label className="text-sm font-medium">{tr('wizard.refreshInterval')}</label>
           <input
             type="number"
             min={0}
@@ -582,7 +584,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
         </div>
 
         <div className="space-y-2">
-          <label className="text-sm font-medium">Timeout (ms)</label>
+          <label className="text-sm font-medium">{tr('wizard.timeout')}</label>
           <input
             type="number"
             min={1000}
@@ -601,7 +603,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
             checked={form.refreshOnStart}
             onChange={(event) => updateForm('refreshOnStart', event.target.checked)}
           />
-          <span>Refresh on app start</span>
+          <span>{tr('wizard.refreshOnStart')}</span>
         </label>
         <label className="inline-flex items-center gap-2 cursor-pointer">
           <input
@@ -609,13 +611,13 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
             checked={form.refreshOnResume}
             onChange={(event) => updateForm('refreshOnResume', event.target.checked)}
           />
-          <span>Refresh on app resume</span>
+          <span>{tr('wizard.refreshOnResume')}</span>
         </label>
       </div>
 
       <div className="p-4 bg-secondary/30 rounded-lg border border-border">
         <div className="flex items-center gap-2 text-sm font-medium mb-2">
-          <FileCode size={16} /> Expected Output Format
+          <FileCode size={16} /> {tr('wizard.expectedOutput')}
         </div>
         <pre className="text-xs font-mono text-muted-foreground overflow-x-auto p-2 bg-black/20 rounded">
 {form.type === 'scalar'
@@ -649,7 +651,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
       {form.type === 'scalar' && (
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <label className="text-sm font-medium">Value Key</label>
+            <label className="text-sm font-medium">{tr('wizard.valueKey')}</label>
             <input
               className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm"
               value={form.scalarValueKey}
@@ -657,7 +659,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
             />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium">Unit Key</label>
+            <label className="text-sm font-medium">{tr('wizard.unitKey')}</label>
             <input
               className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm"
               value={form.scalarUnitKey}
@@ -665,7 +667,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
             />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium">Trend Key</label>
+            <label className="text-sm font-medium">{tr('wizard.trendKey')}</label>
             <input
               className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm"
               value={form.scalarTrendKey}
@@ -673,7 +675,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
             />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium">Color Key</label>
+            <label className="text-sm font-medium">{tr('wizard.colorKey')}</label>
             <input
               className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm"
               value={form.scalarColorKey}
@@ -686,7 +688,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
       {form.type === 'series' && (
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <label className="text-sm font-medium">X Axis Key</label>
+            <label className="text-sm font-medium">{tr('wizard.xAxisKey')}</label>
             <input
               className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm"
               value={form.seriesXAxisKey}
@@ -694,7 +696,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
             />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium">Series Key</label>
+            <label className="text-sm font-medium">{tr('wizard.seriesKey')}</label>
             <input
               className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm"
               value={form.seriesKey}
@@ -702,7 +704,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
             />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium">Series Name Key</label>
+            <label className="text-sm font-medium">{tr('wizard.seriesNameKey')}</label>
             <input
               className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm"
               value={form.seriesNameKey}
@@ -710,7 +712,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
             />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium">Series Values Key</label>
+            <label className="text-sm font-medium">{tr('wizard.seriesValuesKey')}</label>
             <input
               className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm"
               value={form.seriesValuesKey}
@@ -723,7 +725,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
       {form.type === 'status' && (
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
-            <label className="text-sm font-medium">Label Key</label>
+            <label className="text-sm font-medium">{tr('wizard.labelKey')}</label>
             <input
               className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm"
               value={form.statusLabelKey}
@@ -731,7 +733,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
             />
           </div>
           <div className="space-y-2">
-            <label className="text-sm font-medium">State Key</label>
+            <label className="text-sm font-medium">{tr('wizard.stateKey')}</label>
             <input
               className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm"
               value={form.statusStateKey}
@@ -739,7 +741,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
             />
           </div>
           <div className="space-y-2 col-span-2">
-            <label className="text-sm font-medium">Message Key (optional)</label>
+            <label className="text-sm font-medium">{tr('wizard.messageKeyOptional')}</label>
             <input
               className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm"
               value={form.statusMessageKey}
@@ -750,7 +752,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
       )}
 
       <div className="rounded-lg border border-border/70 bg-secondary/20 p-3 text-xs text-muted-foreground">
-        映射字段支持点路径，例如 <code>metrics.cpu.value</code>。
+        {tr('wizard.mappingHint')}
       </div>
     </div>
   );
@@ -759,7 +761,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
     if (!testResult) {
       return (
         <div className="w-full h-32 border border-dashed border-border rounded-lg flex items-center justify-center text-sm text-muted-foreground bg-secondary/10">
-          请点击 Run Test 生成预览
+          {tr('wizard.clickRunTest')}
         </div>
       );
     }
@@ -767,7 +769,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
     if (!testResult.ok) {
       return (
         <div className="w-full border border-red-500/30 bg-red-500/10 rounded-lg p-4 text-sm text-red-300">
-          <p className="font-medium mb-1">Test Failed</p>
+          <p className="font-medium mb-1">{tr('wizard.testFailed')}</p>
           <p>{testResult.error}</p>
         </div>
       );
@@ -777,7 +779,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
       const payload = testResult.payload as any;
       return (
         <div className="w-full border border-emerald-500/30 bg-emerald-500/10 rounded-lg p-4">
-          <p className="text-xs uppercase text-emerald-300 mb-2">Scalar Preview</p>
+          <p className="text-xs uppercase text-emerald-300 mb-2">{tr('wizard.scalarPreview')}</p>
           <div className="text-3xl font-bold">
             {payload.value}
             {payload.unit ? <span className="text-base ml-1 text-muted-foreground">{payload.unit}</span> : null}
@@ -790,9 +792,13 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
       const payload = testResult.payload as any;
       return (
         <div className="w-full border border-blue-500/30 bg-blue-500/10 rounded-lg p-4 space-y-2">
-          <p className="text-xs uppercase text-blue-300">Series Preview</p>
-          <p className="text-sm text-muted-foreground">Points: {payload?.x_axis?.length ?? 0}</p>
-          <p className="text-sm text-muted-foreground">Series Count: {payload?.series?.length ?? 0}</p>
+          <p className="text-xs uppercase text-blue-300">{tr('wizard.seriesPreview')}</p>
+          <p className="text-sm text-muted-foreground">
+            {tr('wizard.points', { count: payload?.x_axis?.length ?? 0 })}
+          </p>
+          <p className="text-sm text-muted-foreground">
+            {tr('wizard.seriesCount', { count: payload?.series?.length ?? 0 })}
+          </p>
         </div>
       );
     }
@@ -800,7 +806,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
     const payload = testResult.payload as any;
     return (
       <div className="w-full border border-amber-500/30 bg-amber-500/10 rounded-lg p-4 space-y-2">
-        <p className="text-xs uppercase text-amber-300">Status Preview</p>
+        <p className="text-xs uppercase text-amber-300">{tr('wizard.statusPreview')}</p>
         <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/40 px-3 py-1 text-sm font-medium">
           <CircleDot size={14} />
           <span>{payload?.label}</span>
@@ -815,26 +821,26 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
     <div className="space-y-5 animate-in fade-in slide-in-from-right-4 duration-300">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h3 className="text-lg font-medium">Test & Preview</h3>
-          <p className="text-sm text-muted-foreground">运行脚本并检查映射结果</p>
+          <h3 className="text-lg font-medium">{tr('wizard.testAndPreview')}</h3>
         </div>
         <Button onClick={runTest} disabled={isTesting}>
-          {isTesting ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Play size={16} className="mr-2" />} Run Test
+          {isTesting ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Play size={16} className="mr-2" />}{' '}
+          {isTesting ? tr('wizard.running') : tr('wizard.runTest')}
         </Button>
       </div>
 
       {renderPreview()}
 
       <div className="space-y-2">
-        <p className="text-sm font-medium">Raw STDOUT</p>
+        <p className="text-sm font-medium">{tr('wizard.rawStdout')}</p>
         <pre className="text-xs font-mono bg-black/20 rounded p-3 max-h-40 overflow-auto border border-border/60">
-          {testResult?.rawStdout || 'No output yet'}
+          {testResult?.rawStdout || tr('wizard.noOutputYet')}
         </pre>
       </div>
 
       {testResult?.rawStderr && (
         <div className="space-y-2">
-          <p className="text-sm font-medium text-amber-400">STDERR</p>
+          <p className="text-sm font-medium text-amber-400">{tr('wizard.stderr')}</p>
           <pre className="text-xs font-mono bg-black/20 rounded p-3 max-h-40 overflow-auto border border-border/60 text-amber-300">
             {testResult.rawStderr}
           </pre>
@@ -844,13 +850,18 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
       {testResult?.ok && (
         <div className="flex items-center gap-2 text-emerald-400 text-sm">
           <CheckCircle2 size={16} />
-          <span>Test passed. You can save this card now.</span>
+          <span>{tr('wizard.testPassed')}</span>
         </div>
       )}
     </div>
   );
 
-  const stepLabels = ['Info', 'Source', 'Mapping', 'Test'];
+  const stepLabels = [
+    tr('wizard.step.info'),
+    tr('wizard.step.source'),
+    tr('wizard.step.mapping'),
+    tr('wizard.step.test'),
+  ];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
@@ -858,11 +869,9 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
         <div className="flex items-center justify-between p-6 border-b border-border">
           <div>
             <h2 className="text-xl font-semibold text-foreground">
-              {isEditing ? 'Edit Metric' : 'Add New Metric'}
+              {isEditing ? tr('wizard.editMetric') : tr('wizard.addMetric')}
             </h2>
-            <p className="text-sm text-muted-foreground">
-              Configure your local Python script as a data source.
-            </p>
+            <p className="text-sm text-muted-foreground">{tr('wizard.subtitle')}</p>
           </div>
           <Button variant="ghost" size="icon" onClick={onClose}>
             <X size={20} />
@@ -903,16 +912,16 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
 
         <div className="p-6 border-t border-border flex justify-between bg-card">
           <Button variant="ghost" onClick={goBack} disabled={step === 1}>
-            Back
+            {tr('common.back')}
           </Button>
 
           {step < 4 ? (
             <Button onClick={goNext}>
-              Next <ChevronRight size={16} className="ml-1" />
+              {tr('common.next')} <ChevronRight size={16} className="ml-1" />
             </Button>
           ) : (
             <Button onClick={handleSubmit} className="bg-emerald-600 hover:bg-emerald-700 text-white">
-              {isEditing ? 'Save Changes' : 'Create Card'}
+              {isEditing ? tr('wizard.saveChanges') : tr('wizard.createCard')}
             </Button>
           )}
         </div>

@@ -7,6 +7,7 @@ import { StatusCard } from './cards/StatusCard';
 import { Plus, LayoutTemplate, Check, RefreshCw } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Card } from '../types';
+import { t } from '../i18n';
 
 interface DashboardProps {
   onAddClick: () => void;
@@ -23,7 +24,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
     moveCard,
     refreshAllCards,
     refreshCard,
+    language,
   } = useStore();
+  const tr = (key: string) => t(language, key);
 
   const [draggingCardId, setDraggingCardId] = useState<string | null>(null);
   const [dragCardSize, setDragCardSize] = useState<{ w: number; h: number } | null>(null);
@@ -170,7 +173,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">MyMetrics</h1>
-          <p className="text-muted-foreground mt-1">Personal Data & Scripts Dashboard</p>
+          <p className="text-muted-foreground mt-1">{tr('dashboard.subtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
           {isEditMode ? (
@@ -179,21 +182,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
               variant="secondary"
               className="bg-primary/10 text-primary border border-primary/20"
             >
-              <Check size={16} className="mr-2" /> Done Editing
+              <Check size={16} className="mr-2" /> {tr('dashboard.doneEditing')}
             </Button>
           ) : (
             <>
               <Button onClick={() => refreshAllCards('manual')} variant="outline">
-                <RefreshCw size={16} className="mr-2" /> Refresh All
+                <RefreshCw size={16} className="mr-2" /> {tr('dashboard.refreshAll')}
               </Button>
               <Button onClick={handleToggleEditMode} variant="outline">
-                <LayoutTemplate size={16} className="mr-2" /> Edit Layout
+                <LayoutTemplate size={16} className="mr-2" /> {tr('dashboard.editLayout')}
               </Button>
               <Button
                 onClick={onAddClick}
                 className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20"
               >
-                <Plus size={16} className="mr-2" /> Add Card
+                <Plus size={16} className="mr-2" /> {tr('dashboard.addCard')}
               </Button>
             </>
           )}
@@ -218,7 +221,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
               }
             `}
           >
-            {group}
+            {group === 'All' ? tr('common.all') : group}
           </button>
         ))}
       </div>
@@ -226,9 +229,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
       <div className="flex-1 min-h-0 overflow-y-auto relative border border-transparent">
         {displayedCards.length === 0 && !isEditMode ? (
           <div className="flex flex-col items-center justify-center py-20 border-2 border-dashed border-border rounded-xl bg-card/30 mt-8">
-            <p className="text-muted-foreground">No metrics found in this group.</p>
+            <p className="text-muted-foreground">{tr('dashboard.noMetricsInGroup')}</p>
             <Button variant="link" onClick={onAddClick} className="mt-2">
-              Create your first card
+              {tr('dashboard.createFirstCard')}
             </Button>
           </div>
         ) : (

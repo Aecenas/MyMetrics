@@ -1,14 +1,16 @@
 import React from 'react';
 import { useStore } from '../store';
 import { LayoutDashboard, Trash2, Settings, ChevronLeft, ChevronRight, Activity } from 'lucide-react';
+import { t } from '../i18n';
 
 export const Sidebar = () => {
-  const { currentView, setView, sidebarOpen, toggleSidebar } = useStore();
+  const { currentView, setView, sidebarOpen, toggleSidebar, language } = useStore();
+  const tr = (key: string) => t(language, key);
 
   const menuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'recycle_bin', label: 'Recycle Bin', icon: Trash2 },
-    { id: 'settings', label: 'Settings', icon: Settings },
+    { id: 'dashboard', label: tr('sidebar.dashboard'), icon: LayoutDashboard },
+    { id: 'recycle_bin', label: tr('sidebar.recycleBin'), icon: Trash2 },
+    { id: 'settings', label: tr('sidebar.settings'), icon: Settings },
   ];
 
   return (

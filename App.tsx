@@ -12,6 +12,7 @@ const App: React.FC = () => {
     currentView,
     sidebarOpen,
     theme,
+    language,
     initializeStore,
     isInitialized,
     cards,
@@ -43,6 +44,10 @@ const App: React.FC = () => {
   }, [theme]);
 
   useEffect(() => {
+    window.document.documentElement.lang = language;
+  }, [language]);
+
+  useEffect(() => {
     const unsub = useStore.subscribe((state) => {
       if (!state.isInitialized) return;
 
@@ -51,6 +56,7 @@ const App: React.FC = () => {
         storageService.save({
           schema_version: 1,
           theme: state.theme,
+          language: state.language,
           cards: state.cards,
           activeGroup: state.activeGroup,
           default_python_path: state.defaultPythonPath,

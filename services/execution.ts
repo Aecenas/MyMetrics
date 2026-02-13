@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import {
+  AppLanguage,
   Card,
   CardType,
   MappingConfig,
@@ -8,6 +9,7 @@ import {
   ScriptOutputSeries,
   ScriptOutputStatus,
 } from '../types';
+import { t } from '../i18n';
 
 export interface RunPythonScriptRequest {
   script_path: string;
@@ -53,6 +55,9 @@ export interface DraftExecutionInput {
 }
 
 const isTauri = () => typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
+const getLanguage = (): AppLanguage =>
+  typeof document !== 'undefined' && document.documentElement.lang === 'zh-CN' ? 'zh-CN' : 'en-US';
+const tr = (key: string, params?: Record<string, string | number>) => t(getLanguage(), key, params);
 
 const clip = (value: string, max = 300) => {
   if (value.length <= max) return value;
@@ -89,7 +94,7 @@ const normalizeScalar = (data: unknown, mapping: MappingConfig): ScriptOutputSca
 
   const value = readPath(data, scalarMapping.value_key);
   if (value === undefined || value === null) {
-    throw new Error(`字段映射失败：未找到 scalar value (${scalarMapping.value_key})`);
+    throw new Error(tr('exec.mappingScalarValueMissing', { path: scalarMapping.value_key }));
   }
 
   const unit = readPath(data, scalarMapping.unit_key);
@@ -120,10 +125,10 @@ const normalizeSeries = (data: unknown, mapping: MappingConfig): ScriptOutputSer
   const seriesRaw = readPath(data, seriesMapping.series_key);
 
   if (!Array.isArray(xAxisRaw)) {
-    throw new Error(`字段映射失败：x_axis 不是数组 (${seriesMapping.x_axis_key})`);
+    throw new Error(tr('exec.mappingXAxisNotArray', { path: seriesMapping.x_axis_key }));
   }
   if (!Array.isArray(seriesRaw)) {
-    throw new Error(`字段映射失败：series 不是数组 (${seriesMapping.series_key})`);
+    throw new Error(tr('exec.mappingSeriesNotArray', { path: seriesMapping.series_key }));
   }
 
   const series = seriesRaw.map((item, index) => {
@@ -131,7 +136,7 @@ const normalizeSeries = (data: unknown, mapping: MappingConfig): ScriptOutputSer
     const values = readPath(item, seriesMapping.series_values_key);
 
     if (!Array.isArray(values)) {
-      throw new Error(`字段映射失败：series[${index}].values 不是数组`);
+      throw new Error(tr('exec.mappingSeriesValuesNotArray', { index }));
     }
 
     return {
@@ -159,7 +164,7 @@ const normalizeStatus = (data: unknown, mapping: MappingConfig): ScriptOutputSta
   const message = readPath(data, statusMapping.message_key);
 
   if (label === undefined || label === null) {
-    throw new Error(`字段映射失败：未找到 status label (${statusMapping.label_key})`);
+    throw new Error(tr('exec.mappingStatusLabelMissing', { path: statusMapping.label_key }));
   }
 
   return {
@@ -171,19 +176,19 @@ const normalizeStatus = (data: unknown, mapping: MappingConfig): ScriptOutputSta
 
 const normalizePayload = (output: any, type: CardType, mapping: MappingConfig): NormalizedCardPayload => {
   if (!output || typeof output !== 'object') {
-    throw new Error('脚本输出不是有效 JSON 对象');
+    throw new Error(tr('exec.outputNotObject'));
   }
 
   if (typeof output.type !== 'string') {
-    throw new Error('脚本输出缺少 type 字段');
+    throw new Error(tr('exec.outputMissingType'));
   }
 
   if (!('data' in output)) {
-    throw new Error('脚本输出缺少 data 字段');
+    throw new Error(tr('exec.outputMissingData'));
   }
 
   if (output.type !== type) {
-    throw new Error(`脚本输出类型为 ${output.type}，与卡片类型 ${type} 不一致`);
+    throw new Error(tr('exec.outputTypeMismatch', { outputType: output.type, cardType: type }));
   }
 
   if (type === 'scalar') return normalizeScalar(output.data, mapping);
@@ -193,7 +198,7 @@ const normalizePayload = (output: any, type: CardType, mapping: MappingConfig): 
 
 const runScript = async (request: RunPythonScriptRequest): Promise<RunPythonScriptResponse> => {
   if (!isTauri()) {
-    throw new Error('当前运行环境不是 Tauri，无法调用本地 Python 脚本');
+    throw new Error(tr('exec.notTauri'));
   }
 
   return invoke<RunPythonScriptResponse>('run_python_script', {
@@ -202,12 +207,12 @@ const runScript = async (request: RunPythonScriptRequest): Promise<RunPythonScri
 };
 
 const normalizeExecutionError = (response: RunPythonScriptResponse): string => {
-  if (response.timed_out) return '脚本执行超时，请检查脚本逻辑或增大超时时间';
+  if (response.timed_out) return tr('exec.timeout');
   if (response.exit_code !== 0) {
-    if (response.stderr.trim()) return `脚本执行失败：${clip(response.stderr.trim())}`;
-    return `脚本执行失败，退出码 ${response.exit_code}`;
+    if (response.stderr.trim()) return tr('exec.failedWithStderr', { stderr: clip(response.stderr.trim()) });
+    return tr('exec.failedWithExitCode', { code: response.exit_code });
   }
-  return '脚本执行失败';
+  return tr('exec.failedGeneric');
 };
 
 const executeDraft = async (input: DraftExecutionInput): Promise<ExecutionResult> => {
@@ -239,7 +244,7 @@ const executeDraft = async (input: DraftExecutionInput): Promise<ExecutionResult
     } catch {
       return {
         ok: false,
-        error: `脚本输出不是合法 JSON：${clip(response.stdout)}`,
+        error: tr('exec.invalidJson', { output: clip(response.stdout) }),
         rawStdout: response.stdout,
         rawStderr: response.stderr,
         timedOut: response.timed_out,
@@ -292,17 +297,17 @@ export const executionService = {
     pythonPath?: string,
   ): Promise<ValidatePythonScriptResponse> {
     if (!scriptPath.trim()) {
-      return { valid: false, message: '脚本路径不能为空' };
+      return { valid: false, message: tr('exec.validatePathRequired') };
     }
 
     if (!scriptPath.endsWith('.py')) {
-      return { valid: false, message: '脚本文件必须以 .py 结尾' };
+      return { valid: false, message: tr('exec.validatePathExt') };
     }
 
     if (!isTauri()) {
       return {
         valid: true,
-        message: '浏览器模式下仅做基础校验，完整校验需在 Tauri 桌面端进行',
+        message: tr('exec.validateBrowserOnly'),
       };
     }
 

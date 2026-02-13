@@ -9,16 +9,20 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts';
+import { useStore } from '../../store';
+import { t } from '../../i18n';
 
 interface SeriesCardProps {
   card: Card;
 }
 
 export const SeriesCard: React.FC<SeriesCardProps> = ({ card }) => {
+  const language = useStore((state) => state.language);
+  const tr = (key: string) => t(language, key);
   const payload = card.runtimeData?.payload as ScriptOutputSeries | undefined;
 
   if (!payload || !payload.series || payload.series.length === 0) {
-    return <div className="text-sm text-muted-foreground">No Data</div>;
+    return <div className="text-sm text-muted-foreground">{tr('common.noData')}</div>;
   }
 
   const chartData = payload.x_axis.map((label, index) => {

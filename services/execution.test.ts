@@ -81,6 +81,6 @@ describe('execution contract normalize', () => {
         'series',
         {},
       ),
-    ).toThrow(/不一致/);
+    ).toThrow(/card type|不一致/);
   });
 });

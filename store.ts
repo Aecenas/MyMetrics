@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Card, CardRuntimeData, AppSettings, ViewMode } from './types';
+import { Card, CardRuntimeData, AppSettings, ViewMode, AppLanguage } from './types';
 import { storageService } from './services/storage';
 import { executionService } from './services/execution';
 
@@ -174,11 +174,13 @@ interface AppState {
   isInitialized: boolean;
 
   theme: 'dark' | 'light';
+  language: AppLanguage;
   cards: Card[];
   dataPath: string;
   defaultPythonPath?: string;
 
   setTheme: (theme: 'dark' | 'light') => void;
+  setLanguage: (language: AppLanguage) => void;
   setView: (view: ViewMode) => void;
   toggleSidebar: () => void;
   setActiveGroup: (group: string) => void;
@@ -205,13 +207,15 @@ export const useStore = create<AppState>((set, get) => ({
   sidebarOpen: true,
   activeGroup: 'All',
   theme: 'dark',
+  language: 'en-US',
   isEditMode: false,
   isInitialized: false,
   cards: [],
-  dataPath: 'Loading...',
+  dataPath: '',
   defaultPythonPath: undefined,
 
   setTheme: (theme) => set({ theme }),
+  setLanguage: (language) => set({ language }),
   setView: (view) => set({ currentView: view }),
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
   setActiveGroup: (group) => set({ activeGroup: group }),
@@ -229,6 +233,7 @@ export const useStore = create<AppState>((set, get) => ({
       const hydratedCards = recalcSortOrder(cleanedCards.map(hydrateRuntimeData));
       set({
         theme: persisted.theme,
+        language: persisted.language,
         cards: hydratedCards,
         activeGroup: persisted.activeGroup,
         defaultPythonPath: persisted.default_python_path,
@@ -249,6 +254,7 @@ export const useStore = create<AppState>((set, get) => ({
     const initialSettings: AppSettings = {
       schema_version: 1,
       theme: get().theme,
+      language: get().language,
       activeGroup: get().activeGroup,
       cards: hydratedCards,
       default_python_path: undefined,
