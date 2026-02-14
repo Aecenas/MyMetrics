@@ -245,6 +245,18 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
     return true;
   };
 
+  const validateAllRequiredSteps = () => {
+    const requiredSteps = [1, 2, 3];
+    for (const requiredStep of requiredSteps) {
+      const ok = validateStep(requiredStep);
+      if (!ok) {
+        setStep(requiredStep);
+        return false;
+      }
+    }
+    return true;
+  };
+
   const browseScriptFile = async () => {
     try {
       const selected = await open({
@@ -263,9 +275,8 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
   };
 
   const runTest = async () => {
-    const valid = validateStep(1) && validateStep(2) && validateStep(3);
+    const valid = validateAllRequiredSteps();
     if (!valid) {
-      setStep(1);
       return;
     }
 
@@ -285,7 +296,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
   };
 
   const handleSubmit = async () => {
-    const valid = validateStep(1) && validateStep(2) && validateStep(3);
+    const valid = validateAllRequiredSteps();
     if (!valid) return;
 
     const mappingConfig = buildMappingConfig(form);
@@ -882,16 +893,34 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
           <div className="flex items-center mb-8 gap-3 text-sm overflow-x-auto pb-2">
             {stepLabels.map((label, index) => {
               const currentStep = index + 1;
-              const active = step >= currentStep;
+              const active = isEditing ? step === currentStep : step >= currentStep;
 
               return (
                 <React.Fragment key={label}>
-                  <div className={`flex items-center gap-2 ${active ? 'text-primary' : 'text-muted-foreground'}`}>
-                    <span className="w-6 h-6 rounded-full border border-current flex items-center justify-center text-xs">
-                      {currentStep}
-                    </span>
-                    <span>{label}</span>
-                  </div>
+                  {isEditing ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setValidationMessage('');
+                        setStep(currentStep);
+                      }}
+                      className={`flex items-center gap-2 ${
+                        active ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      <span className="w-6 h-6 rounded-full border border-current flex items-center justify-center text-xs">
+                        {currentStep}
+                      </span>
+                      <span>{label}</span>
+                    </button>
+                  ) : (
+                    <div className={`flex items-center gap-2 ${active ? 'text-primary' : 'text-muted-foreground'}`}>
+                      <span className="w-6 h-6 rounded-full border border-current flex items-center justify-center text-xs">
+                        {currentStep}
+                      </span>
+                      <span>{label}</span>
+                    </div>
+                  )}
                   {currentStep < stepLabels.length && <div className="h-px w-8 bg-border" />}
                 </React.Fragment>
               );
@@ -915,13 +944,24 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
             {tr('common.back')}
           </Button>
 
-          {step < 4 ? (
+          {isEditing ? (
+            <div className="flex items-center gap-2">
+              {step < 4 && (
+                <Button variant="outline" onClick={goNext}>
+                  {tr('common.next')} <ChevronRight size={16} className="ml-1" />
+                </Button>
+              )}
+              <Button onClick={handleSubmit} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                {tr('wizard.saveChanges')}
+              </Button>
+            </div>
+          ) : step < 4 ? (
             <Button onClick={goNext}>
               {tr('common.next')} <ChevronRight size={16} className="ml-1" />
             </Button>
           ) : (
             <Button onClick={handleSubmit} className="bg-emerald-600 hover:bg-emerald-700 text-white">
-              {isEditing ? tr('wizard.saveChanges') : tr('wizard.createCard')}
+              {tr('wizard.createCard')}
             </Button>
           )}
         </div>
