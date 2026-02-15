@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Card, CardRuntimeData, AppSettings, ViewMode, AppLanguage } from './types';
+import { Card, CardRuntimeData, AppSettings, ViewMode, AppLanguage, SectionMarker } from './types';
 import { storageService } from './services/storage';
 import { executionService } from './services/execution';
 import { ensureCardLayoutScopes, getCardLayoutPosition, setCardLayoutPosition } from './layout';
@@ -19,6 +19,49 @@ const getCardSize = (size: Card['ui_config']['size']) => ({
   w: size.startsWith('2') ? 2 : 1,
   h: size.endsWith('2') ? 2 : 1,
 });
+
+const normalizeSectionMarker = (marker: SectionMarker): SectionMarker => {
+  const start_col = Math.max(0, Math.min(GRID_COLUMNS - 1, Math.floor(Number(marker.start_col) || 0)));
+  const span_col = Math.max(
+    1,
+    Math.min(GRID_COLUMNS - start_col, Math.floor(Number(marker.span_col) || 1)),
+  );
+  const line_color: SectionMarker['line_color'] = ['primary', 'red', 'green', 'blue', 'amber'].includes(
+    marker.line_color,
+  )
+    ? marker.line_color
+    : 'primary';
+  const line_style: SectionMarker['line_style'] = ['dashed', 'solid'].includes(marker.line_style)
+    ? marker.line_style
+    : 'dashed';
+  const line_width = Math.max(1, Math.min(4, Math.floor(Number(marker.line_width) || 2))) as SectionMarker['line_width'];
+  const label_align: SectionMarker['label_align'] = ['left', 'center', 'right'].includes(marker.label_align)
+    ? marker.label_align
+    : 'center';
+
+  return {
+    ...marker,
+    title: marker.title.trim() || 'Section',
+    group: marker.group.trim() || 'Default',
+    after_row: Math.max(-1, Math.floor(Number(marker.after_row) || 0)),
+    start_col,
+    span_col,
+    line_color,
+    line_style,
+    line_width,
+    label_align,
+  };
+};
+
+const sortSectionMarkers = (markers: SectionMarker[]) =>
+  markers
+    .slice()
+    .sort((a, b) => {
+      if (a.group !== b.group) return a.group.localeCompare(b.group);
+      if (a.after_row !== b.after_row) return a.after_row - b.after_row;
+      if (a.start_col !== b.start_col) return a.start_col - b.start_col;
+      return a.id.localeCompare(b.id);
+    });
 
 const rangesOverlap = (startA: number, lengthA: number, startB: number, lengthB: number) =>
   startA < startB + lengthB && startA + lengthA > startB;
@@ -254,6 +297,7 @@ interface AppState {
   theme: 'dark' | 'light';
   language: AppLanguage;
   cards: Card[];
+  sectionMarkers: SectionMarker[];
   dataPath: string;
   defaultPythonPath?: string;
 
@@ -273,6 +317,17 @@ interface AppState {
   hardDeleteCard: (id: string) => void;
   clearRecycleBin: () => void;
   addCard: (card: Card) => void;
+  addSectionMarker: (
+    section: Omit<SectionMarker, 'id' | 'line_color' | 'line_style' | 'line_width' | 'label_align'> & {
+      id?: string;
+      line_color?: SectionMarker['line_color'];
+      line_style?: SectionMarker['line_style'];
+      line_width?: SectionMarker['line_width'];
+      label_align?: SectionMarker['label_align'];
+    },
+  ) => void;
+  updateSectionMarker: (id: string, updates: Partial<SectionMarker>) => void;
+  removeSectionMarker: (id: string) => void;
   updateCard: (id: string, updates: Partial<Card>) => void;
   moveCard: (id: string, x: number, y: number, scopeGroup?: string) => boolean;
 
@@ -289,6 +344,7 @@ export const useStore = create<AppState>((set, get) => ({
   isEditMode: false,
   isInitialized: false,
   cards: [],
+  sectionMarkers: [],
   dataPath: '',
   defaultPythonPath: undefined,
 
@@ -315,6 +371,7 @@ export const useStore = create<AppState>((set, get) => ({
         theme: persisted.theme,
         language: persisted.language,
         cards: hydratedCards,
+        sectionMarkers: sortSectionMarkers(persisted.section_markers ?? []),
         activeGroup: persisted.activeGroup,
         defaultPythonPath: persisted.default_python_path,
         dataPath: currentPath,
@@ -337,11 +394,13 @@ export const useStore = create<AppState>((set, get) => ({
       language: get().language,
       activeGroup: get().activeGroup,
       cards: hydratedCards,
+      section_markers: [],
       default_python_path: undefined,
     };
 
     set({
       cards: hydratedCards,
+      sectionMarkers: [],
       dataPath: currentPath,
       isInitialized: true,
     });
@@ -447,6 +506,44 @@ export const useStore = create<AppState>((set, get) => ({
 
       return { cards: recalcSortOrder([...state.cards, withPlacement]) };
     }),
+
+  addSectionMarker: (incomingSection) =>
+    set((state) => {
+      const section = normalizeSectionMarker({
+        id: incomingSection.id ?? crypto.randomUUID(),
+        title: incomingSection.title,
+        group: incomingSection.group,
+        after_row: incomingSection.after_row,
+        start_col: incomingSection.start_col,
+        span_col: incomingSection.span_col,
+        line_color: incomingSection.line_color ?? 'primary',
+        line_style: incomingSection.line_style ?? 'dashed',
+        line_width: incomingSection.line_width ?? 2,
+        label_align: incomingSection.label_align ?? 'center',
+      });
+
+      return {
+        sectionMarkers: sortSectionMarkers([...state.sectionMarkers, section]),
+      };
+    }),
+
+  updateSectionMarker: (id, updates) =>
+    set((state) => {
+      const updated = state.sectionMarkers.map((section) => {
+        if (section.id !== id) return section;
+        return normalizeSectionMarker({
+          ...section,
+          ...updates,
+          id: section.id,
+        });
+      });
+      return { sectionMarkers: sortSectionMarkers(updated) };
+    }),
+
+  removeSectionMarker: (id) =>
+    set((state) => ({
+      sectionMarkers: state.sectionMarkers.filter((section) => section.id !== id),
+    })),
 
   updateCard: (id, updates) =>
     set((state) => {

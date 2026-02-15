@@ -58,6 +58,7 @@ const App: React.FC = () => {
           theme: state.theme,
           language: state.language,
           cards: state.cards,
+          section_markers: state.sectionMarkers,
           activeGroup: state.activeGroup,
           default_python_path: state.defaultPythonPath,
         });

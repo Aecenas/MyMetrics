@@ -45,6 +45,16 @@ describe('storage migration', () => {
           },
         },
       ],
+      section_markers: [
+        {
+          id: 'sec-1',
+          title: ' Core ',
+          group: 'Infra',
+          after_row: 2.8,
+          start_col: -1,
+          span_col: 10,
+        },
+      ],
     };
 
     const migrated = storageMigration.migrateToV1(legacy);
@@ -53,6 +63,20 @@ describe('storage migration', () => {
     expect(migrated.language).toBe('en-US');
     expect(migrated.activeGroup).toBe('Infrastructure');
     expect(migrated.cards).toHaveLength(1);
+    expect(migrated.section_markers).toEqual([
+      {
+        id: 'sec-1',
+        title: 'Core',
+        group: 'Infra',
+        after_row: 2,
+        start_col: 0,
+        span_col: 4,
+        line_color: 'primary',
+        line_style: 'dashed',
+        line_width: 2,
+        label_align: 'center',
+      },
+    ]);
 
     const card = migrated.cards[0];
     expect(card.refresh_config.timeout_ms).toBe(10000);

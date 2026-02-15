@@ -125,12 +125,26 @@ export interface Card {
   runtimeData?: CardRuntimeData;
 }
 
+export interface SectionMarker {
+  id: string;
+  title: string;
+  group: string;
+  after_row: number;
+  start_col: number;
+  span_col: number;
+  line_color: 'primary' | 'red' | 'green' | 'blue' | 'amber';
+  line_style: 'dashed' | 'solid';
+  line_width: 1 | 2 | 3 | 4;
+  label_align: 'left' | 'center' | 'right';
+}
+
 export interface AppSettings {
   schema_version: number;
   theme: 'dark' | 'light';
   language: AppLanguage;
   activeGroup: string;
   cards: Card[];
+  section_markers: SectionMarker[];
   default_python_path?: string;
 }
 

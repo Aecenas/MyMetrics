@@ -1,5 +1,12 @@
 import { BaseDirectory, readTextFile, writeTextFile, mkdir, exists } from '@tauri-apps/plugin-fs';
-import { AppLanguage, AppSettings, Card, MappingConfig, RefreshConfig } from '../types';
+import {
+  AppLanguage,
+  AppSettings,
+  Card,
+  MappingConfig,
+  RefreshConfig,
+  SectionMarker,
+} from '../types';
 import { t } from '../i18n';
 import { ensureCardLayoutScopes } from '../layout';
 
@@ -119,6 +126,42 @@ const deriveCacheFromLegacyRuntime = (legacyRuntimeData: any) => {
   };
 };
 
+const normalizeSectionMarker = (rawMarker: any, index: number): SectionMarker => {
+  const startCol = Math.max(0, Math.min(3, Math.floor(Number(rawMarker?.start_col ?? 0))));
+  const maxSpan = 4 - startCol;
+  const spanCol = Math.max(1, Math.min(maxSpan, Math.floor(Number(rawMarker?.span_col ?? 2))));
+  const lineColorRaw = String(rawMarker?.line_color ?? 'primary');
+  const lineStyleRaw = String(rawMarker?.line_style ?? 'dashed');
+  const lineWidthRaw = Math.floor(Number(rawMarker?.line_width ?? 2));
+  const labelAlignRaw = String(rawMarker?.label_align ?? 'center');
+
+  const line_color: SectionMarker['line_color'] = ['primary', 'red', 'green', 'blue', 'amber'].includes(lineColorRaw)
+    ? (lineColorRaw as SectionMarker['line_color'])
+    : 'primary';
+  const line_style: SectionMarker['line_style'] = ['dashed', 'solid'].includes(lineStyleRaw)
+    ? (lineStyleRaw as SectionMarker['line_style'])
+    : 'dashed';
+  const line_width: SectionMarker['line_width'] = [1, 2, 3, 4].includes(lineWidthRaw)
+    ? (lineWidthRaw as SectionMarker['line_width'])
+    : 2;
+  const label_align: SectionMarker['label_align'] = ['left', 'center', 'right'].includes(labelAlignRaw)
+    ? (labelAlignRaw as SectionMarker['label_align'])
+    : 'center';
+
+  return {
+    id: String(rawMarker?.id ?? crypto.randomUUID()),
+    title: String(rawMarker?.title ?? `Section ${index + 1}`).trim() || `Section ${index + 1}`,
+    group: String(rawMarker?.group ?? 'Default').trim() || 'Default',
+    after_row: Math.max(-1, Math.floor(Number(rawMarker?.after_row ?? 0))),
+    start_col: startCol,
+    span_col: spanCol,
+    line_color,
+    line_style,
+    line_width,
+    label_align,
+  };
+};
+
 const normalizeCard = (rawCard: any, index: number): Card => {
   const cardType: Card['type'] =
     rawCard?.type === 'scalar' || rawCard?.type === 'series' || rawCard?.type === 'status'
@@ -172,6 +215,8 @@ const normalizeCard = (rawCard: any, index: number): Card => {
 const migrateToV1 = (input: any): AppSettings => {
   const cardsRaw = Array.isArray(input?.cards) ? input.cards : [];
   const cards = cardsRaw.map((card: any, index: number) => normalizeCard(card, index));
+  const sectionRaw = Array.isArray(input?.section_markers) ? input.section_markers : [];
+  const sectionMarkers = sectionRaw.map((marker: any, index: number) => normalizeSectionMarker(marker, index));
 
   return {
     schema_version: SCHEMA_VERSION,
@@ -179,6 +224,7 @@ const migrateToV1 = (input: any): AppSettings => {
     language: normalizeLanguage(input?.language),
     activeGroup: typeof input?.activeGroup === 'string' ? input.activeGroup : 'All',
     cards,
+    section_markers: sectionMarkers,
     default_python_path:
       typeof input?.default_python_path === 'string' ? input.default_python_path : undefined,
   };
@@ -202,12 +248,17 @@ const sanitizeForSave = (settings: AppSettings): AppSettings => {
       runtimeData: undefined,
     };
   });
+  const sectionRaw = Array.isArray((settings as Partial<AppSettings>).section_markers)
+    ? (settings as Partial<AppSettings>).section_markers
+    : [];
+  const section_markers = sectionRaw.map((marker, index) => normalizeSectionMarker(marker, index));
 
   return {
     schema_version: SCHEMA_VERSION,
     theme: settings.theme === 'light' ? 'light' : 'dark',
     language: normalizeLanguage((settings as Partial<AppSettings>).language),
     activeGroup: typeof settings.activeGroup === 'string' ? settings.activeGroup : 'All',
+    section_markers,
     default_python_path: settings.default_python_path,
     cards,
   };
