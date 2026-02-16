@@ -6,12 +6,14 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
   writeTextFile: vi.fn(),
   mkdir: vi.fn(),
   exists: vi.fn(),
+  readDir: vi.fn(),
+  remove: vi.fn(),
 }));
 
 import { storageMigration } from './storage';
 
 describe('storage migration', () => {
-  it('migrates legacy payload to v2 schema', () => {
+  it('migrates legacy payload to latest schema with backup defaults', () => {
     const legacy = {
       theme: 'dark',
       activeGroup: 'Infrastructure',
@@ -57,9 +59,9 @@ describe('storage migration', () => {
       ],
     };
 
-    const migrated = storageMigration.migrateToV2(legacy);
+    const migrated = storageMigration.migrateToLatest(legacy);
 
-    expect(migrated.schema_version).toBe(2);
+    expect(migrated.schema_version).toBe(4);
     expect(migrated.language).toBe('en-US');
     expect(migrated.dashboard_columns).toBe(4);
     expect(migrated.adaptive_window_enabled).toBe(true);
@@ -81,6 +83,16 @@ describe('storage migration', () => {
         label_align: 'center',
       },
     ]);
+    expect(migrated.backup_config).toEqual({
+      directory: undefined,
+      retention_count: 5,
+      auto_backup_enabled: true,
+      schedule: {
+        mode: 'daily',
+        hour: 3,
+        minute: 0,
+      },
+    });
 
     const card = migrated.cards[0];
     expect(card.refresh_config.timeout_ms).toBe(10000);
@@ -102,7 +114,7 @@ describe('storage migration', () => {
   });
 
   it('keeps gauge type and default gauge mapping keys', () => {
-    const migrated = storageMigration.migrateToV2({
+    const migrated = storageMigration.migrateToLatest({
       cards: [
         {
           id: 'gauge-1',
@@ -128,7 +140,7 @@ describe('storage migration', () => {
   });
 
   it('normalizes persisted execution history when migrating', () => {
-    const migrated = storageMigration.migrateToV2({
+    const migrated = storageMigration.migrateToLatest({
       schema_version: 1,
       execution_history_limit: 80,
       cards: [
@@ -147,7 +159,14 @@ describe('storage migration', () => {
             next_index: 1,
             entries: [
               { executed_at: 1000, duration_ms: 120, ok: true, timed_out: false, exit_code: 0 },
-              { executed_at: 2000, duration_ms: 140, ok: false, timed_out: true, exit_code: null, error_summary: 'timeout' },
+              {
+                executed_at: 2000,
+                duration_ms: 140,
+                ok: false,
+                timed_out: true,
+                exit_code: null,
+                error_summary: 'timeout',
+              },
               { executed_at: 3000, duration_ms: 160, ok: true, timed_out: false, exit_code: 0 },
             ],
           },
@@ -160,11 +179,112 @@ describe('storage migration', () => {
       size: 3,
       next_index: 3,
       entries: [
-        { executed_at: 1000, duration_ms: 120, ok: true, timed_out: false, exit_code: 0, error_summary: undefined },
-        { executed_at: 2000, duration_ms: 140, ok: false, timed_out: true, exit_code: null, error_summary: 'timeout' },
-        { executed_at: 3000, duration_ms: 160, ok: true, timed_out: false, exit_code: 0, error_summary: undefined },
+        {
+          executed_at: 1000,
+          duration_ms: 120,
+          ok: true,
+          timed_out: false,
+          exit_code: 0,
+          error_summary: undefined,
+        },
+        {
+          executed_at: 2000,
+          duration_ms: 140,
+          ok: false,
+          timed_out: true,
+          exit_code: null,
+          error_summary: 'timeout',
+        },
+        {
+          executed_at: 3000,
+          duration_ms: 160,
+          ok: true,
+          timed_out: false,
+          exit_code: 0,
+          error_summary: undefined,
+        },
       ],
     });
     expect(migrated.execution_history_limit).toBe(80);
+  });
+});
+
+describe('import validation', () => {
+  it('rejects non-object JSON payload', () => {
+    expect(() => storageMigration.validateImportStructure([])).toThrowError(
+      'Import failed: root JSON must be an object.',
+    );
+  });
+
+  it('rejects invalid cards field type', () => {
+    expect(() => storageMigration.validateImportStructure({ cards: 'bad' })).toThrowError(
+      'Import failed: field "cards" must be an array.',
+    );
+  });
+
+  it('rejects invalid schema version', () => {
+    expect(() => storageMigration.validateImportStructure({ schema_version: -1 })).toThrowError(
+      'Import failed: schema_version must be a positive integer.',
+    );
+  });
+});
+
+describe('backup helpers', () => {
+  it('normalizes backup retention and schedule', () => {
+    expect(storageMigration.clampBackupRetentionCount(0)).toBe(3);
+    expect(storageMigration.clampBackupRetentionCount(999)).toBe(20);
+    expect(storageMigration.clampBackupRetentionCount(5)).toBe(5);
+    expect(storageMigration.normalizeIntervalMinutes(1)).toBe(60);
+    expect(storageMigration.normalizeIntervalMinutes(30)).toBe(30);
+
+    expect(storageMigration.normalizeBackupSchedule({ mode: 'daily', hour: 25, minute: 99 })).toEqual({
+      mode: 'daily',
+      hour: 3,
+      minute: 0,
+    });
+    expect(storageMigration.normalizeBackupSchedule({ mode: 'interval', every_minutes: 180 })).toEqual({
+      mode: 'interval',
+      every_minutes: 180,
+    });
+    expect(
+      storageMigration.normalizeBackupSchedule(
+        { mode: 'weekly', weekday: 4, hour: 10, minute: 30 },
+        '04:15',
+      ),
+    ).toEqual({
+      mode: 'weekly',
+      weekday: 4,
+      hour: 10,
+      minute: 30,
+    });
+    expect(storageMigration.normalizeBackupSchedule(undefined, '09:05')).toEqual({
+      mode: 'daily',
+      hour: 9,
+      minute: 5,
+    });
+    expect(
+      storageMigration.normalizeBackupConfig({
+        auto_backup_enabled: false,
+        retention_count: 9,
+        schedule: { mode: 'interval', every_minutes: 30 },
+      }),
+    ).toEqual({
+      directory: undefined,
+      retention_count: 9,
+      auto_backup_enabled: false,
+      schedule: { mode: 'interval', every_minutes: 30 },
+    });
+  });
+
+  it('rotates backup files by retention count', () => {
+    const files = [
+      'backup-20260216-010101.json',
+      'backup-20260216-020202.json',
+      'backup-20260216-030303.json',
+      'backup-20260216-040404.json',
+      'manual-note.txt',
+    ];
+
+    expect(storageMigration.getBackupFilesToDelete(files, 3)).toEqual(['backup-20260216-010101.json']);
   });
 });

@@ -198,10 +198,41 @@ export interface AppSettings {
   adaptive_window_enabled: boolean;
   refresh_concurrency_limit: number;
   execution_history_limit: number;
+  backup_config: BackupConfig;
   activeGroup: string;
   cards: Card[];
   section_markers: SectionMarker[];
   default_python_path?: string;
+}
+
+export interface BackupConfig {
+  directory?: string;
+  retention_count: number;
+  auto_backup_enabled: boolean;
+  schedule: BackupSchedule;
+}
+
+export type BackupIntervalMinutes = 5 | 30 | 60 | 180 | 720;
+export type BackupWeekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+export type BackupSchedule = BackupIntervalSchedule | BackupDailySchedule | BackupWeeklySchedule;
+
+export interface BackupIntervalSchedule {
+  mode: 'interval';
+  every_minutes: BackupIntervalMinutes;
+}
+
+export interface BackupDailySchedule {
+  mode: 'daily';
+  hour: number;
+  minute: number;
+}
+
+export interface BackupWeeklySchedule {
+  mode: 'weekly';
+  weekday: BackupWeekday;
+  hour: number;
+  minute: number;
 }
 
 export type ViewMode = 'dashboard' | 'diagnostics' | 'recycle_bin' | 'settings';

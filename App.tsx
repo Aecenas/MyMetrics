@@ -1,13 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useStore } from './store';
+import { buildSettingsPayload, useStore } from './store';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { RecycleBin } from './components/RecycleBin';
 import { Settings } from './components/Settings';
 import { Diagnostics } from './components/Diagnostics';
 import { CreationWizard } from './components/CreationWizard';
-import { storageService, STORAGE_SCHEMA_VERSION } from './services/storage';
+import { storageService } from './services/storage';
 import { clampDashboardColumns, DEFAULT_DASHBOARD_COLUMNS } from './grid';
+import { BackupSchedule } from './types';
 
 const DEFAULT_WINDOW_WIDTH = 1380;
 const WINDOW_MIN_WIDTH = 730;
@@ -88,6 +89,33 @@ const calculateWindowSize = ({
   };
 };
 
+const getDelayUntilNextAutoBackup = (schedule: BackupSchedule): number => {
+  const now = new Date();
+
+  if (schedule.mode === 'interval') {
+    return Math.max(1_000, schedule.every_minutes * 60 * 1000);
+  }
+
+  if (schedule.mode === 'daily') {
+    const next = new Date(now);
+    next.setHours(schedule.hour, schedule.minute, 0, 0);
+    if (next.getTime() <= now.getTime()) {
+      next.setDate(next.getDate() + 1);
+    }
+    return Math.max(1_000, next.getTime() - now.getTime());
+  }
+
+  const next = new Date(now);
+  const dayOffset = (schedule.weekday - now.getDay() + 7) % 7;
+  next.setDate(now.getDate() + dayOffset);
+  next.setHours(schedule.hour, schedule.minute, 0, 0);
+  if (next.getTime() <= now.getTime()) {
+    next.setDate(next.getDate() + 7);
+  }
+
+  return Math.max(1_000, next.getTime() - now.getTime());
+};
+
 const App: React.FC = () => {
   const {
     currentView,
@@ -99,6 +127,10 @@ const App: React.FC = () => {
     cards,
     dashboardColumns,
     adaptiveWindowEnabled,
+    backupDirectory,
+    backupRetentionCount,
+    backupAutoEnabled,
+    backupSchedule,
     refreshAllCards,
     refreshCard,
   } = useStore();
@@ -108,6 +140,7 @@ const App: React.FC = () => {
 
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intervalRefs = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+  const autoBackupTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startupRefreshDoneRef = useRef(false);
   const resumeCooldownRef = useRef(0);
 
@@ -225,19 +258,7 @@ const App: React.FC = () => {
 
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = setTimeout(() => {
-        storageService.save({
-          schema_version: STORAGE_SCHEMA_VERSION,
-          theme: state.theme,
-          language: state.language,
-          dashboard_columns: state.dashboardColumns,
-          adaptive_window_enabled: state.adaptiveWindowEnabled,
-          refresh_concurrency_limit: state.refreshConcurrencyLimit,
-          execution_history_limit: state.executionHistoryLimit,
-          cards: state.cards,
-          section_markers: state.sectionMarkers,
-          activeGroup: state.activeGroup,
-          default_python_path: state.defaultPythonPath,
-        });
+        storageService.save(buildSettingsPayload(state));
       }, 600);
     });
 
@@ -246,6 +267,41 @@ const App: React.FC = () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (!isInitialized || !isTauri() || !backupAutoEnabled) return;
+
+    let disposed = false;
+
+    const scheduleNext = () => {
+      if (disposed) return;
+      const delay = getDelayUntilNextAutoBackup(backupSchedule);
+      autoBackupTimeoutRef.current = setTimeout(async () => {
+        try {
+          const snapshot = useStore.getState();
+          if (!snapshot.isInitialized) return;
+          await storageService.createBackup(buildSettingsPayload(snapshot), {
+            directory: snapshot.backupDirectory,
+            retentionCount: snapshot.backupRetentionCount,
+          });
+        } catch (error) {
+          console.error('Auto backup failed', error);
+        } finally {
+          scheduleNext();
+        }
+      }, delay);
+    };
+
+    scheduleNext();
+
+    return () => {
+      disposed = true;
+      if (autoBackupTimeoutRef.current) {
+        clearTimeout(autoBackupTimeoutRef.current);
+        autoBackupTimeoutRef.current = null;
+      }
+    };
+  }, [isInitialized, backupAutoEnabled, backupSchedule, backupDirectory, backupRetentionCount]);
 
   useEffect(() => {
     if (!isInitialized) return;

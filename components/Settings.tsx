@@ -1,24 +1,34 @@
 import React, { useEffect, useState } from 'react';
-import { useStore } from '../store';
+import { buildSettingsPayload, useStore } from '../store';
 import {
   Bell,
   Database,
+  Download,
   Folder,
+  HardDriveDownload,
   Info,
   LayoutGrid,
   Moon,
   RefreshCw,
+  Upload,
   Sun,
   TerminalSquare,
   Wrench,
   type LucideIcon,
 } from 'lucide-react';
 import { Button } from './ui/Button';
-import { open } from '@tauri-apps/plugin-dialog';
+import { open, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { t } from '../i18n';
 import { MAX_DASHBOARD_COLUMNS, MIN_DASHBOARD_COLUMNS } from '../grid';
 import { MAX_REFRESH_CONCURRENCY, MIN_REFRESH_CONCURRENCY } from '../refresh';
 import { notificationService, NotificationPermissionStatus } from '../services/notification';
+import {
+  BACKUP_INTERVAL_VALUES,
+  MAX_BACKUP_RETENTION,
+  MIN_BACKUP_RETENTION,
+  storageService,
+} from '../services/storage';
+import { BackupIntervalMinutes, BackupWeekday } from '../types';
 import {
   clampExecutionHistoryLimit,
   MAX_EXECUTION_HISTORY_LIMIT,
@@ -73,6 +83,18 @@ export const Settings = () => {
     setAdaptiveWindowEnabled,
     dataPath,
     updateDataPath,
+    backupDirectory,
+    backupRetentionCount,
+    backupAutoEnabled,
+    backupSchedule,
+    setBackupDirectory,
+    setBackupRetentionCount,
+    setBackupAutoEnabled,
+    setBackupScheduleMode,
+    setBackupIntervalMinutes,
+    setBackupDailyTime,
+    setBackupWeeklySchedule,
+    applyImportedSettings,
     defaultPythonPath,
     setDefaultPythonPath,
     refreshConcurrencyLimit,
@@ -85,6 +107,11 @@ export const Settings = () => {
   const [executionHistoryLimitInput, setExecutionHistoryLimitInput] = useState(
     String(executionHistoryLimit),
   );
+  const [backupPathDisplay, setBackupPathDisplay] = useState('');
+  const [storageHint, setStorageHint] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [isBackingUp, setIsBackingUp] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermissionStatus>('unsupported');
   const [isUpdatingNotificationPermission, setIsUpdatingNotificationPermission] = useState(false);
   const [isSendingTestNotification, setIsSendingTestNotification] = useState(false);
@@ -98,6 +125,22 @@ export const Settings = () => {
   useEffect(() => {
     setExecutionHistoryLimitInput(String(executionHistoryLimit));
   }, [executionHistoryLimit]);
+
+  useEffect(() => {
+    let active = true;
+    const refreshBackupPath = async () => {
+      const resolved = await storageService.getCurrentBackupPath({ directory: backupDirectory });
+      if (active) {
+        setBackupPathDisplay(resolved);
+      }
+    };
+
+    void refreshBackupPath();
+
+    return () => {
+      active = false;
+    };
+  }, [backupDirectory, dataPath]);
 
   const refreshNotificationPermission = async () => {
     const status = await notificationService.getPermissionStatus();
@@ -154,8 +197,9 @@ export const Settings = () => {
         title: tr('settings.selectDataFolder'),
       });
 
-      if (selected) {
-        await updateDataPath(selected as string);
+      const selectedPath = Array.isArray(selected) ? selected[0] : selected;
+      if (selectedPath) {
+        await updateDataPath(selectedPath);
       }
     } catch (error) {
       console.error('Failed to open dialog', error);
@@ -177,9 +221,134 @@ export const Settings = () => {
     setExecutionHistoryLimitInput(String(normalized));
   };
 
+  const retentionOptions = Array.from(
+    { length: MAX_BACKUP_RETENTION - MIN_BACKUP_RETENTION + 1 },
+    (_, index) => MIN_BACKUP_RETENTION + index,
+  );
+
+  const hourOptions = Array.from({ length: 24 }, (_, hour) => hour);
+  const minuteOptions = Array.from({ length: 60 }, (_, minute) => minute);
+  const weekdayOptions: Array<{ value: BackupWeekday; label: string }> = [
+    { value: 0, label: tr('settings.weekday.sunday') },
+    { value: 1, label: tr('settings.weekday.monday') },
+    { value: 2, label: tr('settings.weekday.tuesday') },
+    { value: 3, label: tr('settings.weekday.wednesday') },
+    { value: 4, label: tr('settings.weekday.thursday') },
+    { value: 5, label: tr('settings.weekday.friday') },
+    { value: 6, label: tr('settings.weekday.saturday') },
+  ];
+
+  const handleChooseBackupFolder = async () => {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: tr('settings.selectBackupFolder'),
+      });
+
+      const selectedPath = Array.isArray(selected) ? selected[0] : selected;
+      if (selectedPath) {
+        setBackupDirectory(selectedPath);
+      }
+    } catch (error) {
+      console.error('Failed to open backup folder dialog', error);
+    }
+  };
+
+  const handleResetBackupFolder = () => {
+    setBackupDirectory(undefined);
+  };
+
+  const createExportFileName = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hour = String(now.getHours()).padStart(2, '0');
+    const minute = String(now.getMinutes()).padStart(2, '0');
+    const second = String(now.getSeconds()).padStart(2, '0');
+    return `dashboard-config-${year}${month}${day}-${hour}${minute}${second}.json`;
+  };
+
+  const handleExportConfig = async () => {
+    setIsExporting(true);
+    setStorageHint('');
+    try {
+      const targetPath = await saveDialog({
+        title: tr('settings.exportDialogTitle'),
+        defaultPath: createExportFileName(),
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      });
+      if (!targetPath) return;
+
+      await storageService.exportToFile(targetPath, buildSettingsPayload(useStore.getState()));
+      setStorageHint(tr('settings.exportSuccess', { path: targetPath }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : tr('settings.importErrorUnknown');
+      setStorageHint(message);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleImportConfig = async () => {
+    setIsImporting(true);
+    setStorageHint('');
+    try {
+      const selected = await open({
+        directory: false,
+        multiple: false,
+        title: tr('settings.importDialogTitle'),
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      });
+      const selectedPath = Array.isArray(selected) ? selected[0] : selected;
+      if (!selectedPath) return;
+
+      const result = await storageService.importFromFile(selectedPath);
+      await applyImportedSettings(result.settings);
+
+      if (result.migratedFromSchemaVersion !== undefined) {
+        setStorageHint(
+          tr('settings.importSuccessMigrated', { schema: result.migratedFromSchemaVersion }),
+        );
+      } else {
+        setStorageHint(tr('settings.importSuccess'));
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : tr('settings.importErrorUnknown');
+      setStorageHint(message);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleCreateBackupNow = async () => {
+    setIsBackingUp(true);
+    setStorageHint('');
+    try {
+      const outputPath = await storageService.createBackup(buildSettingsPayload(useStore.getState()), {
+        directory: backupDirectory,
+        retentionCount: backupRetentionCount,
+      });
+      setStorageHint(tr('settings.backupNowSuccess', { path: outputPath }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : tr('settings.importErrorUnknown');
+      setStorageHint(message);
+    } finally {
+      setIsBackingUp(false);
+    }
+  };
+
   const activeSectionMeta =
     SETTINGS_SECTIONS.find((section) => section.id === activeSection) ?? SETTINGS_SECTIONS[0];
   const ActiveSectionIcon = activeSectionMeta.icon;
+  const getIntervalPresetLabel = (minutes: BackupIntervalMinutes) => {
+    if (minutes === 5) return tr('settings.intervalPreset.5m');
+    if (minutes === 30) return tr('settings.intervalPreset.30m');
+    if (minutes === 60) return tr('settings.intervalPreset.1h');
+    if (minutes === 180) return tr('settings.intervalPreset.3h');
+    return tr('settings.intervalPreset.12h');
+  };
 
   return (
     <div className="p-6 sm:p-8 max-w-6xl mx-auto animate-in fade-in duration-300">
@@ -359,7 +528,7 @@ export const Settings = () => {
           {activeSection === 'storage' && (
             <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
               <h3 className="text-lg font-medium mb-4">{tr('settings.storage')}</h3>
-              <div className="space-y-4">
+              <div className="space-y-6">
                 <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
                   <div>
                     <p className="font-medium">{tr('settings.dataLocation')}</p>
@@ -383,6 +552,246 @@ export const Settings = () => {
                   {dataPath || tr('common.loading')}
                 </div>
                 <div className="text-xs text-amber-500/80">{tr('settings.pathChangeNote')}</div>
+
+                <div className="border-t border-border/60 pt-5 space-y-4">
+                  <div className="space-y-1">
+                    <p className="font-medium">{tr('settings.importExportConfig')}</p>
+                    <p className="text-sm text-muted-foreground">{tr('settings.importExportConfigDesc')}</p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button onClick={handleImportConfig} disabled={isImporting}>
+                      <Upload size={14} className="mr-2" />
+                      {isImporting ? tr('settings.importing') : tr('settings.importConfig')}
+                    </Button>
+                    <Button variant="outline" onClick={handleExportConfig} disabled={isExporting}>
+                      <Download size={14} className="mr-2" />
+                      {isExporting ? tr('settings.exporting') : tr('settings.exportConfig')}
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="border-t border-border/60 pt-5 space-y-4">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <p className="font-medium">{tr('settings.backup')}</p>
+                        <p className="text-sm text-muted-foreground">{tr('settings.backupDesc')}</p>
+                      </div>
+                      <Button variant="outline" onClick={handleCreateBackupNow} disabled={isBackingUp}>
+                        <HardDriveDownload size={14} className="mr-2" />
+                        {isBackingUp ? tr('settings.backingUp') : tr('settings.backupNow')}
+                      </Button>
+                    </div>
+
+                    <p className="font-medium">{tr('settings.backupFolder')}</p>
+                    <p className="text-sm text-muted-foreground">{tr('settings.backupFolderDesc')}</p>
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" size="sm" onClick={handleChooseBackupFolder}>
+                        <Folder size={14} className="mr-2" /> {tr('settings.changeBackupFolder')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleResetBackupFolder}
+                        title={tr('settings.useDefaultBackupFolder')}
+                      >
+                        <RefreshCw size={14} />
+                      </Button>
+                    </div>
+                    <div className="bg-secondary/20 p-3 rounded-md border border-border/50 font-mono text-xs text-muted-foreground break-all">
+                      {backupPathDisplay || tr('common.loading')}
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <p className="font-medium">{tr('settings.backupRetentionCount')}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {tr('settings.backupRetentionDesc', {
+                          min: MIN_BACKUP_RETENTION,
+                          max: MAX_BACKUP_RETENTION,
+                        })}
+                      </p>
+                      <select
+                        value={backupRetentionCount}
+                        onChange={(event) => setBackupRetentionCount(Number.parseInt(event.target.value, 10))}
+                        className="w-36 bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                      >
+                        {retentionOptions.map((count) => (
+                          <option key={count} value={count}>
+                            {count}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="space-y-1">
+                          <p className="font-medium">{tr('settings.autoBackup')}</p>
+                          <p className="text-sm text-muted-foreground">{tr('settings.autoBackupDesc')}</p>
+                        </div>
+                        <label className="inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={backupAutoEnabled}
+                            onChange={(event) => setBackupAutoEnabled(event.target.checked)}
+                            className="sr-only peer"
+                          />
+                          <div className="relative w-11 h-6 rounded-full border border-border/70 bg-secondary/80 shadow-inner transition-colors peer-checked:bg-emerald-500 peer-checked:border-emerald-500/80">
+                            <span className="absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.35)] transition-transform peer-checked:translate-x-5" />
+                          </div>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  {backupAutoEnabled && (
+                    <>
+                      <div className="space-y-2">
+                        <p className="font-medium">{tr('settings.autoBackupSchedule')}</p>
+                        <p className="text-sm text-muted-foreground">{tr('settings.autoBackupScheduleDesc')}</p>
+                        <select
+                          value={backupSchedule.mode}
+                          onChange={(event) =>
+                            setBackupScheduleMode(event.target.value as 'interval' | 'daily' | 'weekly')
+                          }
+                          className="w-40 bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                        >
+                          <option value="interval">{tr('settings.backupModeInterval')}</option>
+                          <option value="daily">{tr('settings.backupModeDaily')}</option>
+                          <option value="weekly">{tr('settings.backupModeWeekly')}</option>
+                        </select>
+                      </div>
+
+                      {backupSchedule.mode === 'interval' && (
+                        <div className="space-y-2">
+                          <p className="font-medium">{tr('settings.intervalOption')}</p>
+                          <div className="flex flex-wrap gap-2">
+                            {BACKUP_INTERVAL_VALUES.map((minutes) => (
+                              <button
+                                key={minutes}
+                                type="button"
+                                onClick={() => setBackupIntervalMinutes(minutes as BackupIntervalMinutes)}
+                                className={`rounded-md border px-3 py-2 text-sm transition-colors ${
+                                  backupSchedule.every_minutes === minutes
+                                    ? 'border-primary/35 bg-primary/10 text-foreground'
+                                    : 'border-border/80 bg-secondary/30 text-muted-foreground hover:text-foreground'
+                                }`}
+                              >
+                                {getIntervalPresetLabel(minutes as BackupIntervalMinutes)}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {backupSchedule.mode === 'daily' && (
+                        <div className="space-y-2">
+                          <p className="font-medium">{tr('settings.dailyTime')}</p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <select
+                              value={backupSchedule.hour}
+                              onChange={(event) =>
+                                setBackupDailyTime(
+                                  Number.parseInt(event.target.value, 10),
+                                  backupSchedule.minute,
+                                )
+                              }
+                              className="w-24 bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                            >
+                              {hourOptions.map((hour) => (
+                                <option key={hour} value={hour}>
+                                  {hour.toString().padStart(2, '0')}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="text-sm text-muted-foreground">:</span>
+                            <select
+                              value={backupSchedule.minute}
+                              onChange={(event) =>
+                                setBackupDailyTime(
+                                  backupSchedule.hour,
+                                  Number.parseInt(event.target.value, 10),
+                                )
+                              }
+                              className="w-24 bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                            >
+                              {minuteOptions.map((minute) => (
+                                <option key={minute} value={minute}>
+                                  {minute.toString().padStart(2, '0')}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      )}
+
+                      {backupSchedule.mode === 'weekly' && (
+                        <div className="space-y-2">
+                          <p className="font-medium">{tr('settings.weeklyTime')}</p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <select
+                              value={backupSchedule.weekday}
+                              onChange={(event) =>
+                                setBackupWeeklySchedule(
+                                  Number.parseInt(event.target.value, 10) as BackupWeekday,
+                                  backupSchedule.hour,
+                                  backupSchedule.minute,
+                                )
+                              }
+                              className="w-36 bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                            >
+                              {weekdayOptions.map((day) => (
+                                <option key={day.value} value={day.value}>
+                                  {day.label}
+                                </option>
+                              ))}
+                            </select>
+                            <select
+                              value={backupSchedule.hour}
+                              onChange={(event) =>
+                                setBackupWeeklySchedule(
+                                  backupSchedule.weekday,
+                                  Number.parseInt(event.target.value, 10),
+                                  backupSchedule.minute,
+                                )
+                              }
+                              className="w-24 bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                            >
+                              {hourOptions.map((hour) => (
+                                <option key={hour} value={hour}>
+                                  {hour.toString().padStart(2, '0')}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="text-sm text-muted-foreground">:</span>
+                            <select
+                              value={backupSchedule.minute}
+                              onChange={(event) =>
+                                setBackupWeeklySchedule(
+                                  backupSchedule.weekday,
+                                  backupSchedule.hour,
+                                  Number.parseInt(event.target.value, 10),
+                                )
+                              }
+                              className="w-24 bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                            >
+                              {minuteOptions.map((minute) => (
+                                <option key={minute} value={minute}>
+                                  {minute.toString().padStart(2, '0')}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {storageHint && <p className="text-xs text-muted-foreground break-all">{storageHint}</p>}
+                </div>
               </div>
             </div>
           )}

@@ -1,7 +1,20 @@
-import { BaseDirectory, readTextFile, writeTextFile, mkdir, exists } from '@tauri-apps/plugin-fs';
+import {
+  BaseDirectory,
+  readTextFile,
+  writeTextFile,
+  mkdir,
+  exists,
+  readDir,
+  remove,
+} from '@tauri-apps/plugin-fs';
+import { appLocalDataDir, join as joinNativePath } from '@tauri-apps/api/path';
 import {
   AppLanguage,
   AppSettings,
+  BackupConfig,
+  BackupIntervalMinutes,
+  BackupSchedule,
+  BackupWeekday,
   Card,
   MappingConfig,
   RefreshConfig,
@@ -22,19 +35,222 @@ import {
 const POINTER_FILENAME = 'storage_config.json';
 const DATA_FILENAME = 'user_settings.json';
 const DEFAULT_SUBDIR = 'data';
-const SCHEMA_VERSION = 2;
+const DEFAULT_BACKUP_SUBDIR = 'backups';
+const BACKUP_FILENAME_PREFIX = 'backup';
+const SCHEMA_VERSION = 4;
+const MIN_BACKUP_RETENTION_COUNT = 3;
+const MAX_BACKUP_RETENTION_COUNT = 20;
+const DEFAULT_BACKUP_RETENTION_COUNT = 5;
+const BACKUP_INTERVAL_OPTIONS = [5, 30, 60, 180, 720] as const;
+const DEFAULT_BACKUP_INTERVAL_MINUTES: BackupIntervalMinutes = 60;
+const DEFAULT_BACKUP_DAILY_HOUR = 3;
+const DEFAULT_BACKUP_DAILY_MINUTE = 0;
+const DEFAULT_BACKUP_WEEKDAY: BackupWeekday = 1;
 
 interface StorageConfig {
   customPath: string | null;
 }
 
+export interface BackupWriteConfig {
+  directory?: string;
+  retentionCount: number;
+}
+
+export interface ImportSettingsResult {
+  settings: AppSettings;
+  migratedFromSchemaVersion?: number;
+}
+
 const isTauri = () => typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
 const getLanguage = (): AppLanguage =>
   typeof document !== 'undefined' && document.documentElement.lang === 'zh-CN' ? 'zh-CN' : 'en-US';
-const tr = (key: string) => t(getLanguage(), key);
+const tr = (key: string, params?: Record<string, string | number>) => t(getLanguage(), key, params);
 
 const normalizeLanguage = (value: unknown): AppLanguage => (value === 'zh-CN' ? 'zh-CN' : 'en-US');
 const normalizeAdaptiveWindowEnabled = (value: unknown): boolean => value !== false;
+const normalizePathString = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+const normalizeAutoBackupEnabled = (value: unknown): boolean => value !== false;
+
+const clampBackupRetentionCount = (value: unknown): number => {
+  const parsed = Number.parseInt(String(value ?? DEFAULT_BACKUP_RETENTION_COUNT), 10);
+  if (!Number.isFinite(parsed)) return DEFAULT_BACKUP_RETENTION_COUNT;
+  return Math.max(MIN_BACKUP_RETENTION_COUNT, Math.min(MAX_BACKUP_RETENTION_COUNT, parsed));
+};
+
+const normalizeHour = (value: unknown, fallback = DEFAULT_BACKUP_DAILY_HOUR): number => {
+  const hour = Number.parseInt(String(value), 10);
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) return fallback;
+  return hour;
+};
+
+const normalizeMinute = (value: unknown, fallback = DEFAULT_BACKUP_DAILY_MINUTE): number => {
+  const minute = Number.parseInt(String(value), 10);
+  if (!Number.isInteger(minute) || minute < 0 || minute > 59) return fallback;
+  return minute;
+};
+
+const normalizeWeekday = (value: unknown, fallback = DEFAULT_BACKUP_WEEKDAY): BackupWeekday => {
+  const weekday = Number.parseInt(String(value), 10);
+  if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) return fallback;
+  return weekday as BackupWeekday;
+};
+
+const parseLegacyAutoBackupTime = (value: unknown) => {
+  if (typeof value !== 'string') {
+    return { hour: DEFAULT_BACKUP_DAILY_HOUR, minute: DEFAULT_BACKUP_DAILY_MINUTE };
+  }
+
+  const trimmed = value.trim();
+  if (!/^\d{2}:\d{2}$/.test(trimmed)) {
+    return { hour: DEFAULT_BACKUP_DAILY_HOUR, minute: DEFAULT_BACKUP_DAILY_MINUTE };
+  }
+
+  const [hourText, minuteText] = trimmed.split(':');
+  return {
+    hour: normalizeHour(hourText, DEFAULT_BACKUP_DAILY_HOUR),
+    minute: normalizeMinute(minuteText, DEFAULT_BACKUP_DAILY_MINUTE),
+  };
+};
+
+const normalizeIntervalMinutes = (value: unknown): BackupIntervalMinutes => {
+  const parsed = Number.parseInt(String(value), 10);
+  if (BACKUP_INTERVAL_OPTIONS.includes(parsed as BackupIntervalMinutes)) {
+    return parsed as BackupIntervalMinutes;
+  }
+  return DEFAULT_BACKUP_INTERVAL_MINUTES;
+};
+
+const normalizeBackupSchedule = (rawSchedule: any, legacyAutoBackupTime?: unknown): BackupSchedule => {
+  const legacyTime = parseLegacyAutoBackupTime(legacyAutoBackupTime);
+
+  if (!rawSchedule || typeof rawSchedule !== 'object' || Array.isArray(rawSchedule)) {
+    return {
+      mode: 'daily',
+      hour: legacyTime.hour,
+      minute: legacyTime.minute,
+    };
+  }
+
+  if (rawSchedule.mode === 'interval') {
+    return {
+      mode: 'interval',
+      every_minutes: normalizeIntervalMinutes(rawSchedule.every_minutes),
+    };
+  }
+
+  if (rawSchedule.mode === 'weekly') {
+    return {
+      mode: 'weekly',
+      weekday: normalizeWeekday(rawSchedule.weekday),
+      hour: normalizeHour(rawSchedule.hour, legacyTime.hour),
+      minute: normalizeMinute(rawSchedule.minute, legacyTime.minute),
+    };
+  }
+
+  return {
+    mode: 'daily',
+    hour: normalizeHour(rawSchedule.hour, legacyTime.hour),
+    minute: normalizeMinute(rawSchedule.minute, legacyTime.minute),
+  };
+};
+
+const normalizeBackupConfig = (rawConfig: any): BackupConfig => ({
+  directory: normalizePathString(rawConfig?.directory),
+  retention_count: clampBackupRetentionCount(rawConfig?.retention_count),
+  auto_backup_enabled: normalizeAutoBackupEnabled(rawConfig?.auto_backup_enabled),
+  schedule: normalizeBackupSchedule(rawConfig?.schedule, rawConfig?.auto_backup_time),
+});
+
+class ConfigImportError extends Error {
+  code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+    this.name = 'ConfigImportError';
+  }
+}
+
+const ensureImportObject = (input: unknown): Record<string, unknown> => {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new ConfigImportError('root', tr('settings.importErrorRootObject'));
+  }
+
+  return input as Record<string, unknown>;
+};
+
+const ensureOptionalArray = (input: Record<string, unknown>, field: string) => {
+  const value = input[field];
+  if (value === undefined) return;
+  if (!Array.isArray(value)) {
+    throw new ConfigImportError(field, tr('settings.importErrorFieldArray', { field }));
+  }
+};
+
+const ensureOptionalObject = (input: Record<string, unknown>, field: string) => {
+  const value = input[field];
+  if (value === undefined) return;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ConfigImportError(field, tr('settings.importErrorFieldObject', { field }));
+  }
+};
+
+const validateImportStructure = (input: unknown): Record<string, unknown> => {
+  const objectPayload = ensureImportObject(input);
+  ensureOptionalArray(objectPayload, 'cards');
+  ensureOptionalArray(objectPayload, 'section_markers');
+  ensureOptionalObject(objectPayload, 'backup_config');
+  const backupConfig = objectPayload.backup_config as Record<string, unknown> | undefined;
+  if (backupConfig?.schedule !== undefined) {
+    ensureOptionalObject(backupConfig, 'schedule');
+  }
+
+  const schemaVersion = objectPayload.schema_version;
+  if (schemaVersion !== undefined && (!Number.isInteger(schemaVersion) || Number(schemaVersion) <= 0)) {
+    throw new ConfigImportError('schema_version', tr('settings.importErrorSchemaVersion'));
+  }
+
+  return objectPayload;
+};
+
+const dirname = (path: string): string => {
+  const normalized = path.replace(/\\/g, '/');
+  const index = normalized.lastIndexOf('/');
+  if (index <= 0) return '';
+  return normalized.slice(0, index);
+};
+
+const joinPath = (folder: string, name: string): string => {
+  if (!folder) return name;
+  const normalized = folder.replace(/[\\/]+$/, '');
+  return `${normalized}/${name}`;
+};
+
+const formatBackupTimestamp = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hour = String(date.getHours()).padStart(2, '0');
+  const minute = String(date.getMinutes()).padStart(2, '0');
+  const second = String(date.getSeconds()).padStart(2, '0');
+  return `${year}${month}${day}-${hour}${minute}${second}`;
+};
+
+const createBackupFileName = (timestamp = new Date()) =>
+  `${BACKUP_FILENAME_PREFIX}-${formatBackupTimestamp(timestamp)}.json`;
+
+const backupFileNamePattern = new RegExp(`^${BACKUP_FILENAME_PREFIX}-\\d{8}-\\d{6}\\.json$`);
+
+const getBackupFilesToDelete = (fileNames: string[], retentionCount: number) => {
+  const normalizedRetention = clampBackupRetentionCount(retentionCount);
+  const candidates = fileNames.filter((name) => backupFileNamePattern.test(name)).sort();
+  if (candidates.length <= normalizedRetention) return [];
+  return candidates.slice(0, candidates.length - normalizedRetention);
+};
 
 const defaultRefreshConfig: RefreshConfig = {
   interval_sec: 0,
@@ -258,7 +474,7 @@ const normalizeCard = (rawCard: any, index: number, historyLimit: number): Card 
   return ensureCardLayoutScopes(card);
 };
 
-const migrateToV2 = (input: any): AppSettings => {
+const migrateToLatest = (input: any): AppSettings => {
   const dashboard_columns = clampDashboardColumns(input?.dashboard_columns);
   const execution_history_limit = clampExecutionHistoryLimit(input?.execution_history_limit);
   const cardsRaw = Array.isArray(input?.cards) ? input.cards : [];
@@ -276,6 +492,13 @@ const migrateToV2 = (input: any): AppSettings => {
     adaptive_window_enabled: normalizeAdaptiveWindowEnabled(input?.adaptive_window_enabled),
     refresh_concurrency_limit: clampRefreshConcurrency(input?.refresh_concurrency_limit),
     execution_history_limit,
+    backup_config: normalizeBackupConfig(
+      input?.backup_config ?? {
+        directory: input?.backup_directory,
+        retention_count: input?.backup_retention_count,
+        auto_backup_time: input?.auto_backup_time,
+      },
+    ),
     activeGroup: typeof input?.activeGroup === 'string' ? input.activeGroup : 'All',
     cards,
     section_markers: sectionMarkers,
@@ -330,6 +553,7 @@ const sanitizeForSave = (settings: AppSettings): AppSettings => {
     adaptive_window_enabled: normalizeAdaptiveWindowEnabled((settings as Partial<AppSettings>).adaptive_window_enabled),
     refresh_concurrency_limit,
     execution_history_limit,
+    backup_config: normalizeBackupConfig((settings as Partial<AppSettings>).backup_config),
     activeGroup: typeof settings.activeGroup === 'string' ? settings.activeGroup : 'All',
     section_markers,
     default_python_path: settings.default_python_path,
@@ -358,20 +582,77 @@ const resolveDataPath = async (): Promise<{ path: string; baseDir?: BaseDirector
   };
 };
 
+const resolveBackupDirectory = async (config: BackupWriteConfig) => {
+  const customDirectory = normalizePathString(config.directory);
+  if (customDirectory) {
+    return {
+      path: customDirectory,
+      baseDir: undefined,
+      isCustom: true,
+    };
+  }
+
+  const dataLocation = await resolveDataPath();
+  if (dataLocation.baseDir) {
+    const dataDir = dirname(dataLocation.path) || DEFAULT_SUBDIR;
+    return {
+      path: joinPath(dataDir, DEFAULT_BACKUP_SUBDIR),
+      baseDir: dataLocation.baseDir,
+      isCustom: false,
+    };
+  }
+
+  const dataDir = dirname(dataLocation.path);
+  const defaultBackupDir = dataDir ? joinPath(dataDir, DEFAULT_BACKUP_SUBDIR) : DEFAULT_BACKUP_SUBDIR;
+  return {
+    path: defaultBackupDir,
+    baseDir: undefined,
+    isCustom: false,
+  };
+};
+
+const readJsonFile = async (path: string, baseDir?: BaseDirectory) => {
+  const content = baseDir ? await readTextFile(path, { baseDir }) : await readTextFile(path);
+  return JSON.parse(content);
+};
+
+const writeJsonFile = async (path: string, payload: string, baseDir?: BaseDirectory) => {
+  if (baseDir) {
+    await writeTextFile(path, payload, { baseDir });
+    return;
+  }
+  await writeTextFile(path, payload);
+};
+
+const resolveAbsolutePath = async (path: string, baseDir?: BaseDirectory): Promise<string> => {
+  if (!baseDir) return path;
+  if (baseDir === BaseDirectory.AppLocalData) {
+    const basePath = await appLocalDataDir();
+    return joinNativePath(basePath, path);
+  }
+  return path;
+};
+
 export const storageService = {
   async getCurrentDataPath(): Promise<string> {
     if (!isTauri()) return tr('storage.path.browser');
 
     try {
-      if (await exists(POINTER_FILENAME, { baseDir: BaseDirectory.AppLocalData })) {
-        const content = await readTextFile(POINTER_FILENAME, { baseDir: BaseDirectory.AppLocalData });
-        const config = JSON.parse(content) as StorageConfig;
-        if (config.customPath) return config.customPath;
-      }
-      return tr('storage.path.default');
+      const location = await resolveDataPath();
+      const folderPath = location.isCustom ? location.path : dirname(location.path) || DEFAULT_SUBDIR;
+      return await resolveAbsolutePath(folderPath, location.baseDir);
     } catch {
-      return tr('storage.path.default');
+      return await resolveAbsolutePath(DEFAULT_SUBDIR, BaseDirectory.AppLocalData);
     }
+  },
+
+  async getCurrentBackupPath(config?: Pick<BackupConfig, 'directory'>): Promise<string> {
+    if (!isTauri()) return tr('storage.path.browser');
+    const resolved = await resolveBackupDirectory({
+      directory: config?.directory,
+      retentionCount: DEFAULT_BACKUP_RETENTION_COUNT,
+    });
+    return resolveAbsolutePath(resolved.path, resolved.baseDir);
   },
 
   async setCustomDataPath(newFolder: string | null) {
@@ -412,18 +693,18 @@ export const storageService = {
   },
 
   async save(settings: AppSettings) {
-    const payload = JSON.stringify(sanitizeForSave(settings), null, 2);
-
     if (!isTauri()) return;
 
+    const payload = JSON.stringify(sanitizeForSave(settings), null, 2);
     const location = await resolveDataPath();
     if (location.baseDir) {
-      await mkdir(DEFAULT_SUBDIR, { baseDir: location.baseDir, recursive: true });
-      await writeTextFile(location.path, payload, { baseDir: location.baseDir });
+      const dataDir = dirname(location.path) || DEFAULT_SUBDIR;
+      await mkdir(dataDir, { baseDir: location.baseDir, recursive: true });
+      await writeJsonFile(location.path, payload, location.baseDir);
       return;
     }
 
-    await writeTextFile(location.path, payload);
+    await writeJsonFile(location.path, payload);
   },
 
   async load(): Promise<AppSettings | null> {
@@ -431,30 +712,117 @@ export const storageService = {
 
     try {
       const location = await resolveDataPath();
-      let content = '';
-
+      const fsOptions = location.baseDir ? { baseDir: location.baseDir } : undefined;
       if (location.baseDir) {
-        if (!(await exists(location.path, { baseDir: location.baseDir }))) return null;
-        content = await readTextFile(location.path, { baseDir: location.baseDir });
-      } else {
-        content = await readTextFile(location.path);
+        if (!(await exists(location.path, fsOptions))) return null;
+      } else if (!(await exists(location.path))) {
+        return null;
       }
 
-      const parsed = JSON.parse(content);
-      if (parsed?.schema_version === SCHEMA_VERSION) {
-        return sanitizeForSave(parsed as AppSettings);
-      }
-
-      return migrateToV2(parsed);
+      const parsed = await readJsonFile(location.path, location.baseDir);
+      return migrateToLatest(parsed);
     } catch (error) {
       console.error('Failed to load settings from disk', error);
       return null;
     }
   },
+
+  parseImportPayload(input: unknown): ImportSettingsResult {
+    const validatedPayload = validateImportStructure(input);
+    const sourceSchemaVersion = Number.isInteger(validatedPayload.schema_version)
+      ? Number(validatedPayload.schema_version)
+      : undefined;
+
+    return {
+      settings: migrateToLatest(validatedPayload),
+      migratedFromSchemaVersion:
+        sourceSchemaVersion !== undefined && sourceSchemaVersion !== SCHEMA_VERSION
+          ? sourceSchemaVersion
+          : undefined,
+    };
+  },
+
+  parseImportText(rawText: string): ImportSettingsResult {
+    try {
+      const parsed = JSON.parse(rawText);
+      return storageService.parseImportPayload(parsed);
+    } catch (error) {
+      if (error instanceof ConfigImportError) throw error;
+      throw new ConfigImportError('json_parse', tr('settings.importErrorInvalidJson'));
+    }
+  },
+
+  async importFromFile(filePath: string): Promise<ImportSettingsResult> {
+    if (!isTauri()) throw new ConfigImportError('not_tauri', tr('settings.importErrorUnavailable'));
+    try {
+      const rawText = await readTextFile(filePath);
+      return storageService.parseImportText(rawText);
+    } catch (error) {
+      if (error instanceof ConfigImportError) throw error;
+      throw new ConfigImportError('file_read', tr('settings.importErrorReadFailed'));
+    }
+  },
+
+  async exportToFile(filePath: string, settings: AppSettings): Promise<void> {
+    if (!isTauri()) throw new Error(tr('settings.importErrorUnavailable'));
+    const payload = JSON.stringify(sanitizeForSave(settings), null, 2);
+    await writeJsonFile(filePath, payload);
+  },
+
+  async createBackup(settings: AppSettings, config: BackupWriteConfig): Promise<string> {
+    if (!isTauri()) throw new Error(tr('settings.importErrorUnavailable'));
+
+    const backupDirectory = await resolveBackupDirectory(config);
+    const retentionCount = clampBackupRetentionCount(config.retentionCount);
+    const backupFileName = createBackupFileName();
+    const backupFilePath = joinPath(backupDirectory.path, backupFileName);
+    const payload = JSON.stringify(sanitizeForSave(settings), null, 2);
+    const mkdirOptions = backupDirectory.baseDir
+      ? { baseDir: backupDirectory.baseDir, recursive: true }
+      : { recursive: true };
+    await mkdir(backupDirectory.path, mkdirOptions);
+    await writeJsonFile(backupFilePath, payload, backupDirectory.baseDir);
+
+    const readDirOptions = backupDirectory.baseDir ? { baseDir: backupDirectory.baseDir } : undefined;
+    const entries = await readDir(backupDirectory.path, readDirOptions);
+    const fileNames = entries
+      .filter((entry) => entry.isFile)
+      .map((entry) => entry.name)
+      .filter((name): name is string => typeof name === 'string');
+    const staleBackups = getBackupFilesToDelete(fileNames, retentionCount);
+    for (const fileName of staleBackups) {
+      const stalePath = joinPath(backupDirectory.path, fileName);
+      const removeOptions = backupDirectory.baseDir ? { baseDir: backupDirectory.baseDir } : undefined;
+      try {
+        await remove(stalePath, removeOptions);
+      } catch (error) {
+        console.warn(`Failed to remove stale backup: ${stalePath}`, error);
+      }
+    }
+
+    return backupFilePath;
+  },
 };
 
 export const storageMigration = {
-  migrateToV2,
+  migrateToLatest,
+  clampBackupRetentionCount,
+  normalizeBackupSchedule,
+  normalizeBackupConfig,
+  validateImportStructure,
+  getBackupFilesToDelete,
+  normalizeIntervalMinutes,
 };
+
+export const MIN_BACKUP_RETENTION = MIN_BACKUP_RETENTION_COUNT;
+export const MAX_BACKUP_RETENTION = MAX_BACKUP_RETENTION_COUNT;
+export const DEFAULT_BACKUP_RETENTION = DEFAULT_BACKUP_RETENTION_COUNT;
+export const BACKUP_INTERVAL_VALUES: readonly BackupIntervalMinutes[] = BACKUP_INTERVAL_OPTIONS;
+export const DEFAULT_BACKUP_SCHEDULE: BackupSchedule = {
+  mode: 'daily',
+  hour: DEFAULT_BACKUP_DAILY_HOUR,
+  minute: DEFAULT_BACKUP_DAILY_MINUTE,
+};
+export const DEFAULT_BACKUP_WEEKDAY_VALUE: BackupWeekday = DEFAULT_BACKUP_WEEKDAY;
 
 export const STORAGE_SCHEMA_VERSION = SCHEMA_VERSION;

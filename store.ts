@@ -1,6 +1,25 @@
 import { create } from 'zustand';
-import { Card, CardRuntimeData, AppSettings, ViewMode, AppLanguage, SectionMarker } from './types';
-import { storageService, STORAGE_SCHEMA_VERSION } from './services/storage';
+import {
+  Card,
+  CardRuntimeData,
+  AppSettings,
+  BackupConfig,
+  BackupSchedule,
+  BackupIntervalMinutes,
+  BackupWeekday,
+  ViewMode,
+  AppLanguage,
+  SectionMarker,
+} from './types';
+import {
+  BACKUP_INTERVAL_VALUES,
+  DEFAULT_BACKUP_SCHEDULE,
+  DEFAULT_BACKUP_WEEKDAY_VALUE,
+  storageMigration,
+  storageService,
+  STORAGE_SCHEMA_VERSION,
+  DEFAULT_BACKUP_RETENTION,
+} from './services/storage';
 import { executionService } from './services/execution';
 import {
   AlertTriggerEvent,
@@ -494,6 +513,48 @@ const mergeCard = (current: Card, updates: Partial<Card>): Card => {
   };
 };
 
+const DEFAULT_BACKUP_CONFIG: BackupConfig = {
+  directory: undefined,
+  retention_count: DEFAULT_BACKUP_RETENTION,
+  auto_backup_enabled: true,
+  schedule: DEFAULT_BACKUP_SCHEDULE,
+};
+
+const getBackupScheduleTime = (schedule: BackupSchedule): { hour: number; minute: number } => {
+  if (schedule.mode === 'daily' || schedule.mode === 'weekly') {
+    return { hour: schedule.hour, minute: schedule.minute };
+  }
+  return { hour: 3, minute: 0 };
+};
+
+interface NormalizedSettingsForStore {
+  dashboardColumns: number;
+  cards: Card[];
+  sectionMarkers: SectionMarker[];
+  backupConfig: BackupConfig;
+}
+
+const normalizeSettingsForStore = (settings: AppSettings): NormalizedSettingsForStore => {
+  const dashboardColumns = clampDashboardColumns(settings.dashboard_columns);
+  const cleanedCards = settings.cards.filter((card) => !isLegacySampleCard(card));
+  const cards = recalcSortOrder(
+    reflowCardsForColumns(
+      cleanedCards.map(hydrateRuntimeData).map((card) => ensureCardLayoutScopes(card)),
+      dashboardColumns,
+    ),
+  );
+  const sectionMarkers = sortSectionMarkers(
+    (settings.section_markers ?? []).map((section) => normalizeSectionMarker(section, dashboardColumns)),
+  );
+
+  return {
+    dashboardColumns,
+    cards,
+    sectionMarkers,
+    backupConfig: storageMigration.normalizeBackupConfig(settings.backup_config ?? DEFAULT_BACKUP_CONFIG),
+  };
+};
+
 interface AppState {
   currentView: ViewMode;
   sidebarOpen: boolean;
@@ -508,6 +569,10 @@ interface AppState {
   cards: Card[];
   sectionMarkers: SectionMarker[];
   dataPath: string;
+  backupDirectory?: string;
+  backupRetentionCount: number;
+  backupAutoEnabled: boolean;
+  backupSchedule: BackupSchedule;
   defaultPythonPath?: string;
   refreshConcurrencyLimit: number;
   executionHistoryLimit: number;
@@ -521,8 +586,16 @@ interface AppState {
   setActiveGroup: (group: string) => void;
   toggleEditMode: () => void;
   setDefaultPythonPath: (path?: string) => void;
+  setBackupDirectory: (path?: string) => void;
+  setBackupRetentionCount: (count: number) => void;
+  setBackupAutoEnabled: (enabled: boolean) => void;
+  setBackupScheduleMode: (mode: BackupSchedule['mode']) => void;
+  setBackupIntervalMinutes: (minutes: BackupIntervalMinutes) => void;
+  setBackupDailyTime: (hour: number, minute: number) => void;
+  setBackupWeeklySchedule: (weekday: BackupWeekday, hour: number, minute: number) => void;
   setRefreshConcurrencyLimit: (limit: number) => void;
   setExecutionHistoryLimit: (limit: number) => void;
+  applyImportedSettings: (settings: AppSettings) => Promise<void>;
 
   initializeStore: () => Promise<void>;
   updateDataPath: (newPath: string | null) => Promise<void>;
@@ -550,6 +623,42 @@ interface AppState {
   refreshAllCards: (reason?: 'manual' | 'start' | 'resume') => Promise<void>;
 }
 
+export const buildSettingsPayload = (state: Pick<
+  AppState,
+  | 'theme'
+  | 'language'
+  | 'dashboardColumns'
+  | 'adaptiveWindowEnabled'
+  | 'refreshConcurrencyLimit'
+  | 'executionHistoryLimit'
+  | 'backupDirectory'
+  | 'backupRetentionCount'
+  | 'backupAutoEnabled'
+  | 'backupSchedule'
+  | 'activeGroup'
+  | 'cards'
+  | 'sectionMarkers'
+  | 'defaultPythonPath'
+>): AppSettings => ({
+  schema_version: STORAGE_SCHEMA_VERSION,
+  theme: state.theme,
+  language: state.language,
+  dashboard_columns: state.dashboardColumns,
+  adaptive_window_enabled: state.adaptiveWindowEnabled,
+  refresh_concurrency_limit: state.refreshConcurrencyLimit,
+  execution_history_limit: state.executionHistoryLimit,
+  backup_config: storageMigration.normalizeBackupConfig({
+    directory: state.backupDirectory,
+    retention_count: state.backupRetentionCount,
+    auto_backup_enabled: state.backupAutoEnabled,
+    schedule: state.backupSchedule,
+  }),
+  activeGroup: state.activeGroup,
+  cards: state.cards,
+  section_markers: state.sectionMarkers,
+  default_python_path: state.defaultPythonPath,
+});
+
 export const useStore = create<AppState>((set, get) => ({
   currentView: 'dashboard',
   sidebarOpen: true,
@@ -563,6 +672,10 @@ export const useStore = create<AppState>((set, get) => ({
   cards: [],
   sectionMarkers: [],
   dataPath: '',
+  backupDirectory: DEFAULT_BACKUP_CONFIG.directory,
+  backupRetentionCount: DEFAULT_BACKUP_CONFIG.retention_count,
+  backupAutoEnabled: DEFAULT_BACKUP_CONFIG.auto_backup_enabled,
+  backupSchedule: DEFAULT_BACKUP_CONFIG.schedule,
   defaultPythonPath: undefined,
   refreshConcurrencyLimit: DEFAULT_REFRESH_CONCURRENCY,
   executionHistoryLimit: DEFAULT_EXECUTION_HISTORY_LIMIT,
@@ -591,6 +704,87 @@ export const useStore = create<AppState>((set, get) => ({
   setActiveGroup: (group) => set({ activeGroup: group }),
   toggleEditMode: () => set((state) => ({ isEditMode: !state.isEditMode })),
   setDefaultPythonPath: (path) => set({ defaultPythonPath: path?.trim() || undefined }),
+  setBackupDirectory: (path) => set({ backupDirectory: path?.trim() || undefined }),
+  setBackupRetentionCount: (count) =>
+    set({
+      backupRetentionCount: storageMigration.clampBackupRetentionCount(count),
+    }),
+  setBackupAutoEnabled: (enabled) =>
+    set({
+      backupAutoEnabled: Boolean(enabled),
+    }),
+  setBackupScheduleMode: (mode) =>
+    set((state) => {
+      const currentTime = getBackupScheduleTime(state.backupSchedule);
+      const defaultTime = getBackupScheduleTime(DEFAULT_BACKUP_SCHEDULE);
+
+      if (mode === 'interval') {
+        return {
+          backupSchedule: {
+            mode,
+            every_minutes:
+              state.backupSchedule.mode === 'interval'
+                ? state.backupSchedule.every_minutes
+                : BACKUP_INTERVAL_VALUES[0],
+          },
+        };
+      }
+
+      if (mode === 'weekly') {
+        return {
+          backupSchedule: {
+            mode,
+            weekday:
+              state.backupSchedule.mode === 'weekly'
+                ? state.backupSchedule.weekday
+                : DEFAULT_BACKUP_WEEKDAY_VALUE,
+            hour: currentTime.hour,
+            minute: currentTime.minute,
+          },
+        };
+      }
+
+      return {
+        backupSchedule: {
+          mode: 'daily',
+          hour: currentTime.hour ?? defaultTime.hour,
+          minute: currentTime.minute ?? defaultTime.minute,
+        },
+      };
+    }),
+  setBackupIntervalMinutes: (minutes) =>
+    set((state) => {
+      if (state.backupSchedule.mode !== 'interval') return {};
+      return {
+        backupSchedule: {
+          mode: 'interval',
+          every_minutes: storageMigration.normalizeIntervalMinutes(minutes),
+        },
+      };
+    }),
+  setBackupDailyTime: (hour, minute) =>
+    set((state) => {
+      if (state.backupSchedule.mode !== 'daily') return {};
+      return {
+        backupSchedule: {
+          mode: 'daily',
+          hour: Math.max(0, Math.min(23, Math.floor(hour))),
+          minute: Math.max(0, Math.min(59, Math.floor(minute))),
+        },
+      };
+    }),
+  setBackupWeeklySchedule: (weekday, hour, minute) =>
+    set((state) => {
+      if (state.backupSchedule.mode !== 'weekly') return {};
+      return {
+        backupSchedule: {
+          mode: 'weekly',
+          weekday: Math.max(0, Math.min(6, Math.floor(weekday))) as BackupWeekday,
+          hour: Math.max(0, Math.min(23, Math.floor(hour))),
+          minute: Math.max(0, Math.min(59, Math.floor(minute))),
+        },
+      };
+    }),
   setRefreshConcurrencyLimit: (limit) => set({ refreshConcurrencyLimit: clampRefreshConcurrency(limit) }),
   setExecutionHistoryLimit: (limit) =>
     set((state) => {
@@ -619,60 +813,54 @@ export const useStore = create<AppState>((set, get) => ({
     const persisted = await storageService.load();
 
     if (persisted) {
-      const dashboardColumns = clampDashboardColumns(persisted.dashboard_columns);
-      const cleanedCards = persisted.cards.filter((card) => !isLegacySampleCard(card));
-      const hydratedCards = recalcSortOrder(
-        reflowCardsForColumns(
-          cleanedCards.map(hydrateRuntimeData).map((card) => ensureCardLayoutScopes(card)),
-          dashboardColumns,
-        ),
-      );
-      const sectionMarkers = sortSectionMarkers(
-        (persisted.section_markers ?? []).map((section) => normalizeSectionMarker(section, dashboardColumns)),
-      );
+      const normalized = normalizeSettingsForStore(persisted);
       set({
         theme: persisted.theme,
         language: persisted.language,
-        dashboardColumns,
+        dashboardColumns: normalized.dashboardColumns,
         adaptiveWindowEnabled: persisted.adaptive_window_enabled,
         refreshConcurrencyLimit: clampRefreshConcurrency(persisted.refresh_concurrency_limit),
         executionHistoryLimit: clampExecutionHistoryLimit(persisted.execution_history_limit),
-        cards: hydratedCards,
-        sectionMarkers,
+        cards: normalized.cards,
+        sectionMarkers: normalized.sectionMarkers,
+        backupDirectory: normalized.backupConfig.directory,
+        backupRetentionCount: normalized.backupConfig.retention_count,
+        backupAutoEnabled: normalized.backupConfig.auto_backup_enabled,
+        backupSchedule: normalized.backupConfig.schedule,
         activeGroup: persisted.activeGroup,
         defaultPythonPath: persisted.default_python_path,
         dataPath: currentPath,
         isInitialized: true,
       });
 
-      if (cleanedCards.length !== persisted.cards.length || persisted.dashboard_columns !== dashboardColumns) {
+      if (
+        normalized.cards.length !== persisted.cards.length ||
+        persisted.dashboard_columns !== normalized.dashboardColumns ||
+        persisted.backup_config?.retention_count !== normalized.backupConfig.retention_count ||
+        persisted.backup_config?.auto_backup_enabled !== normalized.backupConfig.auto_backup_enabled ||
+        JSON.stringify(persisted.backup_config?.schedule) !== JSON.stringify(normalized.backupConfig.schedule) ||
+        persisted.backup_config?.directory !== normalized.backupConfig.directory
+      ) {
         await storageService.save({
           ...persisted,
-          dashboard_columns: dashboardColumns,
-          cards: hydratedCards,
-          section_markers: sectionMarkers,
+          dashboard_columns: normalized.dashboardColumns,
+          cards: normalized.cards,
+          section_markers: normalized.sectionMarkers,
+          backup_config: normalized.backupConfig,
         });
       }
       return;
     }
 
-    const hydratedCards = recalcSortOrder([]);
-    const initialSettings: AppSettings = {
-      schema_version: STORAGE_SCHEMA_VERSION,
-      theme: get().theme,
-      language: get().language,
-      dashboard_columns: get().dashboardColumns,
-      adaptive_window_enabled: get().adaptiveWindowEnabled,
-      refresh_concurrency_limit: get().refreshConcurrencyLimit,
-      execution_history_limit: get().executionHistoryLimit,
-      activeGroup: get().activeGroup,
-      cards: hydratedCards,
-      section_markers: [],
-      default_python_path: undefined,
-    };
+    const cards = recalcSortOrder([]);
+    const initialSettings: AppSettings = buildSettingsPayload({
+      ...get(),
+      cards,
+      sectionMarkers: [],
+    });
 
     set({
-      cards: hydratedCards,
+      cards,
       sectionMarkers: [],
       dashboardColumns: get().dashboardColumns,
       dataPath: currentPath,
@@ -686,6 +874,40 @@ export const useStore = create<AppState>((set, get) => ({
     await storageService.setCustomDataPath(newPath);
     const displayPath = await storageService.getCurrentDataPath();
     set({ dataPath: displayPath });
+  },
+
+  applyImportedSettings: async (settings) => {
+    const displayPath = await storageService.getCurrentDataPath();
+    const normalized = normalizeSettingsForStore(settings);
+    const persisted: AppSettings = {
+      ...settings,
+      schema_version: STORAGE_SCHEMA_VERSION,
+      dashboard_columns: normalized.dashboardColumns,
+      cards: normalized.cards,
+      section_markers: normalized.sectionMarkers,
+      backup_config: normalized.backupConfig,
+    };
+
+    set({
+      theme: settings.theme,
+      language: settings.language,
+      dashboardColumns: normalized.dashboardColumns,
+      adaptiveWindowEnabled: settings.adaptive_window_enabled,
+      refreshConcurrencyLimit: clampRefreshConcurrency(settings.refresh_concurrency_limit),
+      executionHistoryLimit: clampExecutionHistoryLimit(settings.execution_history_limit),
+      cards: normalized.cards,
+      sectionMarkers: normalized.sectionMarkers,
+      backupDirectory: normalized.backupConfig.directory,
+      backupRetentionCount: normalized.backupConfig.retention_count,
+      backupAutoEnabled: normalized.backupConfig.auto_backup_enabled,
+      backupSchedule: normalized.backupConfig.schedule,
+      activeGroup: settings.activeGroup,
+      defaultPythonPath: settings.default_python_path,
+      dataPath: displayPath,
+      isInitialized: true,
+    });
+
+    await storageService.save(persisted);
   },
 
   softDeleteCard: (id) =>
