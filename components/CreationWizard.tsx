@@ -22,6 +22,7 @@ import { Button } from './ui/Button';
 import { useStore } from '../store';
 import { Card, CardType, MappingConfig, UIConfig } from '../types';
 import { executionService, ExecutionResult } from '../services/execution';
+import { ArgParseError, formatScriptArgs, parseScriptArgs } from '../services/arg-parser';
 import { t } from '../i18n';
 
 interface CreationWizardProps {
@@ -97,12 +98,6 @@ const defaultForm: WizardForm = {
   gaugeUnitKey: 'unit',
 };
 
-const parseArgs = (value: string) =>
-  value
-    .split(' ')
-    .map((item) => item.trim())
-    .filter(Boolean);
-
 const buildMappingConfig = (form: WizardForm): MappingConfig => ({
   scalar: {
     value_key: form.scalarValueKey,
@@ -136,7 +131,7 @@ const createFormFromCard = (card: Card): WizardForm => ({
   size: card.ui_config.size,
   colorTheme: card.ui_config.color_theme,
   scriptPath: card.script_config.path,
-  scriptArgsText: card.script_config.args.join(' '),
+  scriptArgsText: formatScriptArgs(card.script_config.args),
   pythonPath: card.script_config.env_path ?? '',
   intervalSec: card.refresh_config.interval_sec,
   timeoutMs: card.refresh_config.timeout_ms,
@@ -281,6 +276,28 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
     return '';
   };
 
+  const parsedArgs = useMemo(() => {
+    try {
+      return {
+        args: parseScriptArgs(form.scriptArgsText),
+        error: '',
+      };
+    } catch (error) {
+      if (error instanceof ArgParseError && error.code === 'UNCLOSED_QUOTE') {
+        return {
+          args: [] as string[],
+          error: tr('wizard.validation.scriptArgsUnclosedQuote', {
+            quote: error.quote ?? '"',
+          }),
+        };
+      }
+      return {
+        args: [] as string[],
+        error: tr('wizard.validation.scriptArgsInvalid'),
+      };
+    }
+  }, [form.scriptArgsText, language]);
+
   const updateForm = <K extends keyof WizardForm>(key: K, value: WizardForm[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
@@ -312,6 +329,10 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
       }
       if (form.timeoutMs < 1000) {
         setValidationMessage(tr('wizard.validation.timeoutMin'));
+        return false;
+      }
+      if (parsedArgs.error) {
+        setValidationMessage(parsedArgs.error);
         return false;
       }
       if (scriptValidation.status !== 'valid') {
@@ -392,7 +413,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
     const result = await executionService.runDraft({
       type: form.type,
       scriptPath: form.scriptPath.trim(),
-      args: parseArgs(form.scriptArgsText),
+      args: parsedArgs.args,
       pythonPath: form.pythonPath.trim() || undefined,
       timeoutMs: Number(form.timeoutMs),
       mapping: buildMappingConfig(form),
@@ -408,7 +429,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
     if (!valid) return;
 
     const mappingConfig = buildMappingConfig(form);
-    const args = parseArgs(form.scriptArgsText);
+    const args = parsedArgs.args;
     const runtimePayload = testResult?.ok ? testResult.payload : undefined;
 
     if (editingCard) {
@@ -686,6 +707,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
             value={form.scriptArgsText}
             onChange={(event) => updateForm('scriptArgsText', event.target.value)}
           />
+          {parsedArgs.error && <p className="text-xs text-red-400">{parsedArgs.error}</p>}
         </div>
 
         <div className="space-y-2">
@@ -1060,7 +1082,10 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
         <div>
           <h3 className="text-lg font-medium">{tr('wizard.testAndPreview')}</h3>
         </div>
-        <Button onClick={runTest} disabled={isTesting || scriptValidation.status !== 'valid'}>
+        <Button
+          onClick={runTest}
+          disabled={isTesting || scriptValidation.status !== 'valid' || Boolean(parsedArgs.error)}
+        >
           {isTesting ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Play size={16} className="mr-2" />}{' '}
           {isTesting ? tr('wizard.running') : tr('wizard.runTest')}
         </Button>
@@ -1179,7 +1204,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
               )}
               <Button
                 onClick={handleSubmit}
-                disabled={scriptValidation.status !== 'valid'}
+                disabled={scriptValidation.status !== 'valid' || Boolean(parsedArgs.error)}
                 className="bg-emerald-600 hover:bg-emerald-700 text-white"
               >
                 {tr('wizard.saveChanges')}
@@ -1192,7 +1217,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
           ) : (
             <Button
               onClick={handleSubmit}
-              disabled={scriptValidation.status !== 'valid'}
+              disabled={scriptValidation.status !== 'valid' || Boolean(parsedArgs.error)}
               className="bg-emerald-600 hover:bg-emerald-700 text-white"
             >
               {tr('wizard.createCard')}

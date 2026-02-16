@@ -216,6 +216,9 @@ const translations: Record<AppLanguage, TranslationMap> = {
     'wizard.validation.groupRequired': 'Please enter a group name',
     'wizard.validation.scriptPathRequired': 'Please enter a Python script path',
     'wizard.validation.scriptExt': 'Script file must end with .py',
+    'wizard.validation.scriptArgsInvalid': 'Script arguments are invalid',
+    'wizard.validation.scriptArgsUnclosedQuote':
+      'Script arguments contain an unclosed {quote} quote',
     'wizard.validation.scriptChecking': 'Script precheck is still running. Please wait.',
     'wizard.validation.scriptPrecheckPending': 'Run script precheck first.',
     'wizard.validation.scriptPrecheckFailed': 'Script precheck failed. Please fix source settings.',
@@ -433,6 +436,8 @@ const translations: Record<AppLanguage, TranslationMap> = {
     'wizard.validation.groupRequired': '请填写分组名称',
     'wizard.validation.scriptPathRequired': '请填写 Python 脚本路径',
     'wizard.validation.scriptExt': '脚本文件必须是 .py',
+    'wizard.validation.scriptArgsInvalid': '脚本参数格式无效',
+    'wizard.validation.scriptArgsUnclosedQuote': '脚本参数中存在未闭合的 {quote} 引号',
     'wizard.validation.scriptChecking': '脚本预校验进行中，请稍候。',
     'wizard.validation.scriptPrecheckPending': '请先完成脚本预校验。',
     'wizard.validation.scriptPrecheckFailed': '脚本预校验失败，请先修复来源配置。',
