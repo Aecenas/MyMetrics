@@ -80,6 +80,7 @@ export const CardShell: React.FC<CardShellProps> = ({
 
   const isLoading = card.runtimeData?.isLoading;
   const isError = card.runtimeData?.state === 'error';
+  const isSeriesCard = card.type === 'series';
   const thresholdAlertTriggered = Boolean(card.runtimeData?.thresholdAlertTriggered);
   const [thresholdPulseActive, setThresholdPulseActive] = React.useState(false);
   const previousThresholdAlertRef = React.useRef(thresholdAlertTriggered);
@@ -312,7 +313,9 @@ export const CardShell: React.FC<CardShellProps> = ({
       </div>
 
       <div
-        className="flex-1 min-h-0 p-4 pt-0 flex flex-col justify-center pointer-events-none"
+        className={`flex-1 min-h-0 flex flex-col pointer-events-none ${
+          isSeriesCard ? 'px-4 pt-0 pb-1' : 'p-4 pt-0 justify-center'
+        }`}
       >
         {isLoading ? (
           <div className="animate-pulse space-y-2">
