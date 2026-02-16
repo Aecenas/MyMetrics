@@ -85,8 +85,8 @@ const defaultForm: WizardForm = {
   pythonPath: '',
   intervalSec: 300,
   timeoutMs: 10000,
-  refreshOnStart: true,
-  refreshOnResume: true,
+  refreshOnStart: false,
+  refreshOnResume: false,
   scalarValueKey: 'value',
   scalarUnitKey: 'unit',
   scalarTrendKey: 'trend',
@@ -403,7 +403,9 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
           return false;
         }
       }
+    }
 
+    if (targetStep === 4) {
       if (form.alertCooldownSec < 0) {
         setValidationMessage(tr('wizard.validation.alertCooldownMin'));
         return false;
@@ -446,7 +448,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
   };
 
   const validateAllRequiredSteps = () => {
-    const requiredSteps = [1, 2, 3];
+    const requiredSteps = [1, 2, 3, 4];
     for (const requiredStep of requiredSteps) {
       const ok = validateStep(requiredStep);
       if (!ok) {
@@ -611,7 +613,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
     const ok = validateStep(step);
     if (!ok) return;
 
-    if (step < 4) setStep((prev) => prev + 1);
+    if (step < 5) setStep((prev) => prev + 1);
   };
 
   const goBack = () => {
@@ -1061,6 +1063,14 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
         </div>
       )}
 
+      <div className="rounded-lg border border-border/70 bg-secondary/20 p-3 text-xs text-muted-foreground">
+        {tr('wizard.mappingHint')}
+      </div>
+    </div>
+  );
+
+  const renderStepFour = () => (
+    <div className="space-y-5 animate-in fade-in slide-in-from-right-4 duration-300">
       <div className="rounded-lg border border-border/70 bg-secondary/20 p-4 space-y-4">
         <div className="flex items-center justify-between gap-4">
           <div>
@@ -1132,10 +1142,6 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
         {form.type === 'series' && (
           <p className="text-xs text-muted-foreground">{tr('wizard.alerts.seriesNotSupported')}</p>
         )}
-      </div>
-
-      <div className="rounded-lg border border-border/70 bg-secondary/20 p-3 text-xs text-muted-foreground">
-        {tr('wizard.mappingHint')}
       </div>
     </div>
   );
@@ -1226,7 +1232,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
     );
   };
 
-  const renderStepFour = () => (
+  const renderStepFive = () => (
     <div className="space-y-5 animate-in fade-in slide-in-from-right-4 duration-300">
       <div className="flex items-center justify-between gap-4">
         <div>
@@ -1272,6 +1278,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
     tr('wizard.step.info'),
     tr('wizard.step.source'),
     tr('wizard.step.mapping'),
+    tr('wizard.step.alert'),
     tr('wizard.step.test'),
   ];
 
@@ -1332,6 +1339,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
           {step === 2 && renderStepTwo()}
           {step === 3 && renderStepThree()}
           {step === 4 && renderStepFour()}
+          {step === 5 && renderStepFive()}
 
           {validationMessage && (
             <div className="mt-4 rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
@@ -1347,7 +1355,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
 
           {isEditing ? (
             <div className="flex items-center gap-2">
-              {step < 4 && (
+              {step < 5 && (
                 <Button variant="outline" onClick={goNext}>
                   {tr('common.next')} <ChevronRight size={16} className="ml-1" />
                 </Button>
@@ -1360,7 +1368,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
                 {tr('wizard.saveChanges')}
               </Button>
             </div>
-          ) : step < 4 ? (
+          ) : step < 5 ? (
             <Button onClick={goNext}>
               {tr('common.next')} <ChevronRight size={16} className="ml-1" />
             </Button>
