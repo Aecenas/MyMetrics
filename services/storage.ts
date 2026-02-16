@@ -19,6 +19,7 @@ import {
   MappingConfig,
   RefreshConfig,
   SectionMarker,
+  GroupEntity,
 } from '../types';
 import { t } from '../i18n';
 import { ensureCardLayoutScopes } from '../layout';
@@ -37,7 +38,9 @@ const DATA_FILENAME = 'user_settings.json';
 const DEFAULT_SUBDIR = 'data';
 const DEFAULT_BACKUP_SUBDIR = 'backups';
 const BACKUP_FILENAME_PREFIX = 'backup';
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
+const RESERVED_ALL_GROUP = 'All';
+const DEFAULT_GROUP_NAME = 'Default';
 const MIN_BACKUP_RETENTION_COUNT = 3;
 const MAX_BACKUP_RETENTION_COUNT = 20;
 const DEFAULT_BACKUP_RETENTION_COUNT = 5;
@@ -68,6 +71,59 @@ const tr = (key: string, params?: Record<string, string | number>) => t(getLangu
 
 const normalizeLanguage = (value: unknown): AppLanguage => (value === 'zh-CN' ? 'zh-CN' : 'en-US');
 const normalizeAdaptiveWindowEnabled = (value: unknown): boolean => value !== false;
+const isAllGroupName = (name: string): boolean => name.trim().toLowerCase() === RESERVED_ALL_GROUP.toLowerCase();
+const normalizeGroupName = (value: unknown): string => {
+  const trimmed = String(value ?? '').trim();
+  return trimmed.length > 0 ? trimmed : DEFAULT_GROUP_NAME;
+};
+const normalizeGroupEntities = (
+  rawGroups: unknown,
+  cards: Card[],
+  sectionMarkers: SectionMarker[],
+  activeGroup: unknown,
+): GroupEntity[] => {
+  const orderedNames: string[] = [];
+  const seen = new Set<string>();
+  const hasExplicitGroups = Array.isArray(rawGroups);
+  const pushName = (value: unknown) => {
+    const name = normalizeGroupName(value);
+    if (isAllGroupName(name)) return;
+    if (seen.has(name)) return;
+    seen.add(name);
+    orderedNames.push(name);
+  };
+
+  if (hasExplicitGroups) {
+    rawGroups
+      .slice()
+      .sort((a: any, b: any) => {
+        const orderA = Number.isFinite(Number(a?.order)) ? Number(a.order) : Number.MAX_SAFE_INTEGER;
+        const orderB = Number.isFinite(Number(b?.order)) ? Number(b.order) : Number.MAX_SAFE_INTEGER;
+        if (orderA !== orderB) return orderA - orderB;
+        return String(a?.name ?? '').localeCompare(String(b?.name ?? ''));
+      })
+      .forEach((group: any) => pushName(group?.name));
+  }
+
+  cards.forEach((card) => pushName(card.group));
+  if (hasExplicitGroups) {
+    sectionMarkers.forEach((section) => pushName(section.group));
+    if (typeof activeGroup === 'string' && !isAllGroupName(activeGroup)) {
+      pushName(activeGroup);
+    }
+  }
+
+  if (orderedNames.length === 0) {
+    orderedNames.push(DEFAULT_GROUP_NAME);
+  }
+
+  return orderedNames.map((name, order) => ({ name, order }));
+};
+const normalizeActiveGroup = (value: unknown, groups: GroupEntity[]): string => {
+  if (typeof value !== 'string') return RESERVED_ALL_GROUP;
+  if (isAllGroupName(value)) return RESERVED_ALL_GROUP;
+  return groups.some((group) => group.name === value) ? value : RESERVED_ALL_GROUP;
+};
 const normalizePathString = (value: unknown): string | undefined => {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
@@ -203,6 +259,7 @@ const validateImportStructure = (input: unknown): Record<string, unknown> => {
   const objectPayload = ensureImportObject(input);
   ensureOptionalArray(objectPayload, 'cards');
   ensureOptionalArray(objectPayload, 'section_markers');
+  ensureOptionalArray(objectPayload, 'groups');
   ensureOptionalObject(objectPayload, 'backup_config');
   const backupConfig = objectPayload.backup_config as Record<string, unknown> | undefined;
   if (backupConfig?.schedule !== undefined) {
@@ -403,7 +460,7 @@ const normalizeSectionMarker = (rawMarker: any, index: number, columns: number):
   return {
     id: String(rawMarker?.id ?? crypto.randomUUID()),
     title: String(rawMarker?.title ?? `Section ${index + 1}`).trim() || `Section ${index + 1}`,
-    group: String(rawMarker?.group ?? 'Default').trim() || 'Default',
+    group: normalizeGroupName(rawMarker?.group),
     after_row: Math.max(-1, Math.floor(Number(rawMarker?.after_row ?? 0))),
     start_col: startCol,
     span_col: spanCol,
@@ -434,7 +491,7 @@ const normalizeCard = (rawCard: any, index: number, historyLimit: number): Card 
   const card: Card = {
     id: String(rawCard?.id ?? crypto.randomUUID()),
     title: String(rawCard?.title ?? `Card ${index + 1}`),
-    group: String(rawCard?.group ?? 'Default'),
+    group: normalizeGroupName(rawCard?.group),
     type: cardType,
     script_config: {
       path: String(rawCard?.script_config?.path ?? ''),
@@ -483,6 +540,8 @@ const migrateToLatest = (input: any): AppSettings => {
   const sectionMarkers = sectionRaw.map((marker: any, index: number) =>
     normalizeSectionMarker(marker, index, dashboard_columns),
   );
+  const groups = normalizeGroupEntities(input?.groups, cards, sectionMarkers, input?.activeGroup);
+  const activeGroup = normalizeActiveGroup(input?.activeGroup, groups);
 
   return {
     schema_version: SCHEMA_VERSION,
@@ -499,7 +558,8 @@ const migrateToLatest = (input: any): AppSettings => {
         auto_backup_time: input?.auto_backup_time,
       },
     ),
-    activeGroup: typeof input?.activeGroup === 'string' ? input.activeGroup : 'All',
+    activeGroup,
+    groups,
     cards,
     section_markers: sectionMarkers,
     default_python_path:
@@ -544,6 +604,13 @@ const sanitizeForSave = (settings: AppSettings): AppSettings => {
     ? (settings as Partial<AppSettings>).section_markers
     : [];
   const section_markers = sectionRaw.map((marker, index) => normalizeSectionMarker(marker, index, dashboard_columns));
+  const groups = normalizeGroupEntities(
+    (settings as Partial<AppSettings>).groups,
+    cards,
+    section_markers,
+    (settings as Partial<AppSettings>).activeGroup,
+  );
+  const activeGroup = normalizeActiveGroup((settings as Partial<AppSettings>).activeGroup, groups);
 
   return {
     schema_version: SCHEMA_VERSION,
@@ -554,7 +621,8 @@ const sanitizeForSave = (settings: AppSettings): AppSettings => {
     refresh_concurrency_limit,
     execution_history_limit,
     backup_config: normalizeBackupConfig((settings as Partial<AppSettings>).backup_config),
-    activeGroup: typeof settings.activeGroup === 'string' ? settings.activeGroup : 'All',
+    activeGroup,
+    groups,
     section_markers,
     default_python_path: settings.default_python_path,
     cards,

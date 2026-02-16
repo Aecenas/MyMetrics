@@ -6,6 +6,7 @@ import { RecycleBin } from './components/RecycleBin';
 import { Settings } from './components/Settings';
 import { Diagnostics } from './components/Diagnostics';
 import { CreationWizard } from './components/CreationWizard';
+import { GroupManagementCenter } from './components/GroupManagementCenter';
 import { storageService } from './services/storage';
 import { clampDashboardColumns, DEFAULT_DASHBOARD_COLUMNS } from './grid';
 import { BackupSchedule } from './types';
@@ -399,6 +400,11 @@ const App: React.FC = () => {
         <div className="h-full overflow-hidden">
           {currentView === 'dashboard' && (
             <Dashboard onAddClick={openCreateWizard} onEditCard={openEditWizard} />
+          )}
+          {currentView === 'group_management' && (
+            <div className="h-full overflow-y-auto">
+              <GroupManagementCenter />
+            </div>
           )}
           {currentView === 'diagnostics' && (
             <div className="h-full overflow-y-auto">

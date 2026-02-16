@@ -190,6 +190,11 @@ export interface SectionMarker {
   label_align: 'left' | 'center' | 'right';
 }
 
+export interface GroupEntity {
+  name: string;
+  order: number;
+}
+
 export interface AppSettings {
   schema_version: number;
   theme: 'dark' | 'light';
@@ -200,6 +205,7 @@ export interface AppSettings {
   execution_history_limit: number;
   backup_config: BackupConfig;
   activeGroup: string;
+  groups: GroupEntity[];
   cards: Card[];
   section_markers: SectionMarker[];
   default_python_path?: string;
@@ -235,4 +241,4 @@ export interface BackupWeeklySchedule {
   minute: number;
 }
 
-export type ViewMode = 'dashboard' | 'diagnostics' | 'recycle_bin' | 'settings';
+export type ViewMode = 'dashboard' | 'group_management' | 'diagnostics' | 'recycle_bin' | 'settings';

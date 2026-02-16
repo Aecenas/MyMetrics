@@ -73,3 +73,33 @@ export const ensureCardLayoutScopes = (card: Card): Card => {
 
   return next;
 };
+
+export const renameCardLayoutScope = (card: Card, fromGroup: string, toGroup: string): Card => {
+  const fromKey = resolveLayoutScope(fromGroup);
+  const toKey = resolveLayoutScope(toGroup);
+  if (fromKey === toKey) return card;
+  if (!card.layout_positions?.[fromKey]) return card;
+
+  const layout_positions = {
+    ...(card.layout_positions ?? {}),
+    [toKey]: card.layout_positions[fromKey],
+  };
+
+  delete layout_positions[fromKey];
+  return {
+    ...card,
+    layout_positions,
+  };
+};
+
+export const removeCardLayoutScope = (card: Card, group: string): Card => {
+  const scopeKey = resolveLayoutScope(group);
+  if (!card.layout_positions?.[scopeKey]) return card;
+
+  const layout_positions = { ...(card.layout_positions ?? {}) };
+  delete layout_positions[scopeKey];
+  return {
+    ...card,
+    layout_positions,
+  };
+};

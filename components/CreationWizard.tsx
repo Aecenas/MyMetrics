@@ -14,6 +14,7 @@ import {
   CircleDot,
   Gauge,
   Play,
+  Plus,
   Loader2,
   FolderOpen,
 } from 'lucide-react';
@@ -109,6 +110,17 @@ const defaultForm: WizardForm = {
   alertLowerThreshold: '',
 };
 
+const groupMutationErrorKeyMap: Record<string, string> = {
+  empty: 'groups.error.empty',
+  reserved: 'groups.error.reserved',
+  duplicate: 'groups.error.duplicate',
+  not_found: 'groups.error.notFound',
+  target_required: 'groups.error.targetRequired',
+  target_invalid: 'groups.error.targetInvalid',
+  target_same: 'groups.error.targetSame',
+  last_group: 'groups.error.lastGroup',
+};
+
 const buildMappingConfig = (form: WizardForm): MappingConfig => ({
   scalar: {
     value_key: form.scalarValueKey,
@@ -175,7 +187,7 @@ const createFormFromCard = (card: Card): WizardForm => {
 };
 
 export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editingCard }) => {
-  const { cards, addCard, updateCard, refreshCard, defaultPythonPath, language } = useStore();
+  const { cards, groups, addCard, updateCard, refreshCard, createGroup, defaultPythonPath, language } = useStore();
   const tr = (key: string, params?: Record<string, string | number>) => t(language, key, params);
 
   const [step, setStep] = useState(1);
@@ -184,9 +196,24 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
   const [isTesting, setIsTesting] = useState(false);
   const [validationMessage, setValidationMessage] = useState<string>('');
   const [scriptValidation, setScriptValidation] = useState<ScriptValidationState>({ status: 'idle' });
+  const [isCreateGroupOpen, setCreateGroupOpen] = useState(false);
+  const [createGroupName, setCreateGroupName] = useState('');
+  const [createGroupError, setCreateGroupError] = useState('');
   const scriptValidationRequestRef = useRef(0);
 
   const isEditing = Boolean(editingCard);
+
+  const groupOptions = useMemo(
+    () =>
+      groups
+        .slice()
+        .sort((a, b) => {
+          if (a.order !== b.order) return a.order - b.order;
+          return a.name.localeCompare(b.name);
+        })
+        .map((group) => group.name),
+    [groups],
+  );
 
   useEffect(() => {
     scriptValidationRequestRef.current += 1;
@@ -200,15 +227,25 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
       return;
     }
 
-    setForm(defaultForm);
+    setForm({
+      ...defaultForm,
+      group: groupOptions[0] ?? '',
+    });
     setTestResult(null);
     setStep(1);
-  }, [editingCard?.id]);
+  }, [editingCard?.id, groupOptions]);
 
-  const groups = useMemo(() => {
-    const groupSet = new Set(cards.filter((card) => !card.status.is_deleted).map((card) => card.group));
-    return Array.from(groupSet).sort();
-  }, [cards]);
+  useEffect(() => {
+    if (groupOptions.length === 0) {
+      if (form.group) {
+        setForm((prev) => ({ ...prev, group: '' }));
+      }
+      return;
+    }
+    if (!groupOptions.includes(form.group)) {
+      setForm((prev) => ({ ...prev, group: groupOptions[0] }));
+    }
+  }, [groupOptions, form.group]);
 
   useEffect(() => {
     setTestResult(null);
@@ -335,6 +372,24 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
 
   const updateForm = <K extends keyof WizardForm>(key: K, value: WizardForm[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const resolveGroupErrorMessage = (error: string) => tr(groupMutationErrorKeyMap[error] ?? 'groups.error.generic');
+
+  const submitCreateGroup = () => {
+    setCreateGroupError('');
+    const result = createGroup(createGroupName);
+    if ('error' in result) {
+      setCreateGroupError(resolveGroupErrorMessage(result.error));
+      return;
+    }
+
+    const normalizedName = createGroupName.trim();
+    if (normalizedName) {
+      updateForm('group', normalizedName);
+    }
+    setCreateGroupName('');
+    setCreateGroupOpen(false);
   };
 
   const validateStep = (targetStep: number): boolean => {
@@ -637,18 +692,26 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <label className="text-sm font-medium">{tr('wizard.group')}</label>
-          <input
-            list="wizard-group-options"
-            className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-            value={form.group}
-            onChange={(event) => updateForm('group', event.target.value)}
-            placeholder={tr('wizard.groupPlaceholder')}
-          />
-          <datalist id="wizard-group-options">
-            {groups.map((group) => (
-              <option key={group} value={group} />
-            ))}
-          </datalist>
+          <div className="flex gap-2">
+            <select
+              className="flex-1 bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              value={form.group}
+              onChange={(event) => updateForm('group', event.target.value)}
+            >
+              {groupOptions.length === 0 && (
+                <option value="">{tr('wizard.groupEmptyOption')}</option>
+              )}
+              {groupOptions.map((group) => (
+                <option key={group} value={group}>
+                  {group}
+                </option>
+              ))}
+            </select>
+            <Button type="button" variant="outline" onClick={() => setCreateGroupOpen(true)}>
+              <Plus size={14} className="mr-1" /> {tr('wizard.groupCreate')}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">{tr('wizard.groupManageHint')}</p>
         </div>
 
         <div className="space-y-2">
@@ -1383,6 +1446,61 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
           )}
         </div>
       </div>
+
+      {isCreateGroupOpen && (
+        <div className="fixed inset-0 z-[60] bg-black/55 flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-lg font-semibold">{tr('wizard.groupCreateDialogTitle')}</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setCreateGroupOpen(false);
+                  setCreateGroupError('');
+                  setCreateGroupName('');
+                }}
+                className="p-1.5 rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">{tr('wizard.group')}</label>
+              <input
+                autoFocus
+                type="text"
+                value={createGroupName}
+                onChange={(event) => {
+                  setCreateGroupName(event.target.value);
+                  if (createGroupError) setCreateGroupError('');
+                }}
+                placeholder={tr('wizard.groupPlaceholder')}
+                className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+
+            {createGroupError && <p className="text-sm text-destructive">{createGroupError}</p>}
+
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setCreateGroupOpen(false);
+                  setCreateGroupError('');
+                  setCreateGroupName('');
+                }}
+              >
+                {tr('common.cancel')}
+              </Button>
+              <Button type="button" onClick={submitCreateGroup}>
+                {tr('wizard.groupCreateConfirm')}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

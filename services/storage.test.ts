@@ -61,13 +61,16 @@ describe('storage migration', () => {
 
     const migrated = storageMigration.migrateToLatest(legacy);
 
-    expect(migrated.schema_version).toBe(4);
+    expect(migrated.schema_version).toBe(5);
     expect(migrated.language).toBe('en-US');
     expect(migrated.dashboard_columns).toBe(4);
     expect(migrated.adaptive_window_enabled).toBe(true);
     expect(migrated.refresh_concurrency_limit).toBe(4);
     expect(migrated.execution_history_limit).toBe(120);
-    expect(migrated.activeGroup).toBe('Infrastructure');
+    expect(migrated.activeGroup).toBe('All');
+    expect(migrated.groups).toEqual([
+      { name: 'Infra', order: 0 },
+    ]);
     expect(migrated.cards).toHaveLength(1);
     expect(migrated.section_markers).toEqual([
       {
@@ -137,6 +140,45 @@ describe('storage migration', () => {
       value_key: 'value',
       unit_key: 'unit',
     });
+  });
+
+  it('keeps explicit group list and appends card-derived groups', () => {
+    const migrated = storageMigration.migrateToLatest({
+      activeGroup: 'Ops',
+      groups: [
+        { name: 'Ops', order: 2 },
+        { name: 'Infra', order: 1 },
+      ],
+      cards: [
+        {
+          id: 'card-1',
+          title: 'CPU',
+          group: 'Infra',
+          type: 'scalar',
+          script_config: {
+            path: '/tmp/cpu.py',
+            args: [],
+          },
+        },
+        {
+          id: 'card-2',
+          title: 'Queue',
+          group: 'Queue',
+          type: 'scalar',
+          script_config: {
+            path: '/tmp/queue.py',
+            args: [],
+          },
+        },
+      ],
+    });
+
+    expect(migrated.groups).toEqual([
+      { name: 'Infra', order: 0 },
+      { name: 'Ops', order: 1 },
+      { name: 'Queue', order: 2 },
+    ]);
+    expect(migrated.activeGroup).toBe('Ops');
   });
 
   it('normalizes persisted execution history when migrating', () => {

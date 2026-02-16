@@ -4,6 +4,7 @@ import {
   ALL_LAYOUT_SCOPE,
   ensureCardLayoutScopes,
   getCardLayoutPosition,
+  renameCardLayoutScope,
   resolveLayoutScope,
   setCardLayoutPosition,
 } from '../layout';
@@ -61,5 +62,15 @@ describe('layout scopes', () => {
     expect(getCardLayoutPosition(movedInAll, 'All')).toEqual({ x: 6, y: 7 });
     expect(movedInAll.ui_config.x).toBe(6);
     expect(movedInAll.ui_config.y).toBe(7);
+  });
+
+  it('renames group scope without touching all scope', () => {
+    const base = ensureCardLayoutScopes(createBaseCard());
+    const movedInGroup = setCardLayoutPosition(base, 'Infra', { x: 3, y: 4 });
+    const renamed = renameCardLayoutScope(movedInGroup, 'Infra', 'Core');
+
+    expect(renamed.layout_positions?.[resolveLayoutScope('Infra')]).toBeUndefined();
+    expect(renamed.layout_positions?.[resolveLayoutScope('Core')]).toEqual({ x: 3, y: 4 });
+    expect(getCardLayoutPosition(renamed, 'All')).toEqual({ x: 1, y: 2 });
   });
 });

@@ -1,6 +1,15 @@
 import React from 'react';
 import { useStore } from '../store';
-import { LayoutDashboard, Trash2, Settings, ChevronLeft, ChevronRight, Activity, ActivitySquare } from 'lucide-react';
+import {
+  LayoutDashboard,
+  Trash2,
+  Settings,
+  ChevronLeft,
+  ChevronRight,
+  Activity,
+  ActivitySquare,
+  FolderTree,
+} from 'lucide-react';
 import { t } from '../i18n';
 import { ViewMode } from '../types';
 
@@ -10,6 +19,7 @@ export const Sidebar = () => {
 
   const menuItems: Array<{ id: ViewMode; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }> = [
     { id: 'dashboard', label: tr('sidebar.dashboard'), icon: LayoutDashboard },
+    { id: 'group_management', label: tr('sidebar.groupManagement'), icon: FolderTree },
     { id: 'diagnostics', label: tr('sidebar.diagnostics'), icon: ActivitySquare },
     { id: 'recycle_bin', label: tr('sidebar.recycleBin'), icon: Trash2 },
     { id: 'settings', label: tr('sidebar.settings'), icon: Settings },

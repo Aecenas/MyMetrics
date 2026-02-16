@@ -10,6 +10,7 @@ import {
   ViewMode,
   AppLanguage,
   SectionMarker,
+  GroupEntity,
 } from './types';
 import {
   BACKUP_INTERVAL_VALUES,
@@ -35,13 +36,85 @@ import {
   summarizeExecutionError,
   withExecutionHistoryCapacity,
 } from './services/diagnostics';
-import { ensureCardLayoutScopes, getCardLayoutPosition, setCardLayoutPosition } from './layout';
+import {
+  ensureCardLayoutScopes,
+  getCardLayoutPosition,
+  renameCardLayoutScope,
+  setCardLayoutPosition,
+} from './layout';
 import { clampDashboardColumns, DEFAULT_DASHBOARD_COLUMNS } from './grid';
 import { DEFAULT_REFRESH_CONCURRENCY, clampRefreshConcurrency } from './refresh';
 import { t } from './i18n';
 
 const LEGACY_SAMPLE_IDS = new Set(['1', '2', '3', '4']);
 const LEGACY_SAMPLE_TITLES = new Set(['Server CPU', 'RAM Usage', 'Traffic Trend', 'Weather Status']);
+const RESERVED_ALL_GROUP = 'All';
+const DEFAULT_GROUP_NAME = 'Default';
+
+type GroupMutationError =
+  | 'empty'
+  | 'reserved'
+  | 'duplicate'
+  | 'not_found'
+  | 'target_required'
+  | 'target_invalid'
+  | 'target_same'
+  | 'last_group';
+
+type GroupMutationResult = { ok: true } | { ok: false; error: GroupMutationError };
+
+export type GroupBatchOperationType = 'move_group' | 'update_interval' | 'soft_delete' | 'copy_cards';
+
+export type GroupBatchFailureReason =
+  | 'source_group_not_found'
+  | 'target_group_required'
+  | 'target_group_invalid'
+  | 'target_group_same'
+  | 'interval_invalid'
+  | 'no_targets'
+  | 'card_not_found'
+  | 'card_not_in_group'
+  | 'card_deleted'
+  | 'section_not_found'
+  | 'section_not_in_group'
+  | 'section_operation_unsupported';
+
+export interface GroupBatchFailure {
+  entity: 'card' | 'section' | 'request';
+  id: string;
+  reason: GroupBatchFailureReason;
+}
+
+export interface GroupBatchResult {
+  operation: GroupBatchOperationType;
+  requestedCards: number;
+  requestedSections: number;
+  successCards: number;
+  successSections: number;
+  failures: GroupBatchFailure[];
+}
+
+export type GroupBatchActionRequest =
+  | {
+      type: 'move_group';
+      sourceGroup: string;
+      targetGroup: string;
+      cardIds: string[];
+      sectionIds: string[];
+    }
+  | {
+      type: 'update_interval';
+      sourceGroup: string;
+      intervalSec: number;
+      cardIds: string[];
+      sectionIds: string[];
+    }
+  | {
+      type: 'soft_delete';
+      sourceGroup: string;
+      cardIds: string[];
+      sectionIds: string[];
+    };
 
 const inFlightCardIds = new Set<string>();
 const refreshQueue: Array<() => void> = [];
@@ -83,6 +156,87 @@ const getCardSize = (size: Card['ui_config']['size']) => ({
   h: size.endsWith('2') ? 2 : 1,
 });
 
+const isAllGroupName = (name: string): boolean => name.trim().toLowerCase() === RESERVED_ALL_GROUP.toLowerCase();
+
+const normalizeGroupName = (value: unknown): string => {
+  const trimmed = String(value ?? '').trim();
+  return trimmed.length > 0 ? trimmed : DEFAULT_GROUP_NAME;
+};
+
+const uniqueIds = (ids: string[]): string[] => {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  ids.forEach((rawId) => {
+    const id = String(rawId ?? '').trim();
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    result.push(id);
+  });
+  return result;
+};
+
+const normalizeGroupEntities = (
+  groupsInput: GroupEntity[] | undefined,
+  cards: Card[],
+  sectionMarkers: SectionMarker[],
+  activeGroup?: string,
+): GroupEntity[] => {
+  const orderedNames: string[] = [];
+  const seen = new Set<string>();
+
+  const pushName = (rawName: unknown) => {
+    const name = normalizeGroupName(rawName);
+    if (isAllGroupName(name)) return;
+    if (seen.has(name)) return;
+    seen.add(name);
+    orderedNames.push(name);
+  };
+
+  (groupsInput ?? [])
+    .slice()
+    .sort((a, b) => {
+      if (a.order !== b.order) return a.order - b.order;
+      return a.name.localeCompare(b.name);
+    })
+    .forEach((group) => pushName(group.name));
+
+  cards.forEach((card) => pushName(card.group));
+  sectionMarkers.forEach((section) => pushName(section.group));
+
+  if (activeGroup && !isAllGroupName(activeGroup)) {
+    pushName(activeGroup);
+  }
+
+  if (orderedNames.length === 0) {
+    orderedNames.push(DEFAULT_GROUP_NAME);
+  }
+
+  return orderedNames.map((name, order) => ({ name, order }));
+};
+
+const orderedGroupNames = (groups: GroupEntity[]): string[] =>
+  groups
+    .slice()
+    .sort((a, b) => {
+      if (a.order !== b.order) return a.order - b.order;
+      return a.name.localeCompare(b.name);
+    })
+    .map((group) => group.name);
+
+const normalizeActiveGroup = (activeGroup: string, groups: GroupEntity[]): string => {
+  if (isAllGroupName(activeGroup)) return RESERVED_ALL_GROUP;
+  return orderedGroupNames(groups).includes(activeGroup) ? activeGroup : RESERVED_ALL_GROUP;
+};
+
+const normalizeCardGroup = (card: Card): Card => {
+  const normalized = normalizeGroupName(card.group);
+  if (normalized === card.group) return card;
+  return {
+    ...card,
+    group: normalized,
+  };
+};
+
 const normalizeSectionMarker = (marker: SectionMarker, columns: number): SectionMarker => {
   const normalizedColumns = clampDashboardColumns(columns);
   const start_col = Math.max(0, Math.min(normalizedColumns - 1, Math.floor(Number(marker.start_col) || 0)));
@@ -106,7 +260,7 @@ const normalizeSectionMarker = (marker: SectionMarker, columns: number): Section
   return {
     ...marker,
     title: marker.title.trim() || 'Section',
-    group: marker.group.trim() || 'Default',
+    group: normalizeGroupName(marker.group),
     after_row: Math.max(-1, Math.floor(Number(marker.after_row) || 0)),
     start_col,
     span_col,
@@ -117,15 +271,23 @@ const normalizeSectionMarker = (marker: SectionMarker, columns: number): Section
   };
 };
 
-const sortSectionMarkers = (markers: SectionMarker[]) =>
+const sortSectionMarkers = (markers: SectionMarker[], groups: GroupEntity[] = []) => {
+  const rankMap = new Map(orderedGroupNames(groups).map((name, index) => [name, index]));
+
+  return (
   markers
     .slice()
     .sort((a, b) => {
+      const rankA = rankMap.get(a.group) ?? Number.MAX_SAFE_INTEGER;
+      const rankB = rankMap.get(b.group) ?? Number.MAX_SAFE_INTEGER;
+      if (rankA !== rankB) return rankA - rankB;
       if (a.group !== b.group) return a.group.localeCompare(b.group);
       if (a.after_row !== b.after_row) return a.after_row - b.after_row;
       if (a.start_col !== b.start_col) return a.start_col - b.start_col;
       return a.id.localeCompare(b.id);
-    });
+    })
+  );
+};
 
 const rangesOverlap = (startA: number, lengthA: number, startB: number, lengthB: number) =>
   startA < startB + lengthB && startA + lengthA > startB;
@@ -531,6 +693,8 @@ interface NormalizedSettingsForStore {
   dashboardColumns: number;
   cards: Card[];
   sectionMarkers: SectionMarker[];
+  groups: GroupEntity[];
+  activeGroup: string;
   backupConfig: BackupConfig;
 }
 
@@ -539,18 +703,26 @@ const normalizeSettingsForStore = (settings: AppSettings): NormalizedSettingsFor
   const cleanedCards = settings.cards.filter((card) => !isLegacySampleCard(card));
   const cards = recalcSortOrder(
     reflowCardsForColumns(
-      cleanedCards.map(hydrateRuntimeData).map((card) => ensureCardLayoutScopes(card)),
+      cleanedCards
+        .map(normalizeCardGroup)
+        .map(hydrateRuntimeData)
+        .map((card) => ensureCardLayoutScopes(card)),
       dashboardColumns,
     ),
   );
-  const sectionMarkers = sortSectionMarkers(
-    (settings.section_markers ?? []).map((section) => normalizeSectionMarker(section, dashboardColumns)),
+  const sectionMarkers = (settings.section_markers ?? []).map((section) =>
+    normalizeSectionMarker(section, dashboardColumns),
   );
+  const groups = normalizeGroupEntities(settings.groups, cards, sectionMarkers, settings.activeGroup);
+  const normalizedSections = sortSectionMarkers(sectionMarkers, groups);
+  const activeGroup = normalizeActiveGroup(settings.activeGroup, groups);
 
   return {
     dashboardColumns,
     cards,
-    sectionMarkers,
+    sectionMarkers: normalizedSections,
+    groups,
+    activeGroup,
     backupConfig: storageMigration.normalizeBackupConfig(settings.backup_config ?? DEFAULT_BACKUP_CONFIG),
   };
 };
@@ -568,6 +740,7 @@ interface AppState {
   adaptiveWindowEnabled: boolean;
   cards: Card[];
   sectionMarkers: SectionMarker[];
+  groups: GroupEntity[];
   dataPath: string;
   backupDirectory?: string;
   backupRetentionCount: number;
@@ -605,6 +778,12 @@ interface AppState {
   hardDeleteCard: (id: string) => void;
   clearRecycleBin: () => void;
   addCard: (card: Card) => void;
+  duplicateCardsToGroup: (sourceGroup: string, targetGroup: string, cardIds: string[]) => GroupBatchResult;
+  createGroup: (name: string) => GroupMutationResult;
+  renameGroup: (fromName: string, toName: string) => GroupMutationResult;
+  reorderGroups: (orderedNames: string[]) => void;
+  deleteGroup: (name: string, targetGroup?: string) => GroupMutationResult;
+  executeGroupBatchAction: (request: GroupBatchActionRequest) => GroupBatchResult;
   addSectionMarker: (
     section: Omit<SectionMarker, 'id' | 'line_color' | 'line_style' | 'line_width' | 'label_align'> & {
       id?: string;
@@ -636,6 +815,7 @@ export const buildSettingsPayload = (state: Pick<
   | 'backupAutoEnabled'
   | 'backupSchedule'
   | 'activeGroup'
+  | 'groups'
   | 'cards'
   | 'sectionMarkers'
   | 'defaultPythonPath'
@@ -654,6 +834,7 @@ export const buildSettingsPayload = (state: Pick<
     schedule: state.backupSchedule,
   }),
   activeGroup: state.activeGroup,
+  groups: state.groups,
   cards: state.cards,
   section_markers: state.sectionMarkers,
   default_python_path: state.defaultPythonPath,
@@ -671,6 +852,7 @@ export const useStore = create<AppState>((set, get) => ({
   isInitialized: false,
   cards: [],
   sectionMarkers: [],
+  groups: [{ name: DEFAULT_GROUP_NAME, order: 0 }],
   dataPath: '',
   backupDirectory: DEFAULT_BACKUP_CONFIG.directory,
   backupRetentionCount: DEFAULT_BACKUP_CONFIG.retention_count,
@@ -690,6 +872,7 @@ export const useStore = create<AppState>((set, get) => ({
       const cards = recalcSortOrder(reflowCardsForColumns(state.cards, normalizedColumns));
       const sectionMarkers = sortSectionMarkers(
         state.sectionMarkers.map((marker) => normalizeSectionMarker(marker, normalizedColumns)),
+        state.groups,
       );
 
       return {
@@ -701,7 +884,12 @@ export const useStore = create<AppState>((set, get) => ({
   setAdaptiveWindowEnabled: (enabled) => set({ adaptiveWindowEnabled: Boolean(enabled) }),
   setView: (view) => set({ currentView: view }),
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
-  setActiveGroup: (group) => set({ activeGroup: group }),
+  setActiveGroup: (group) =>
+    set((state) => {
+      const activeGroup = normalizeActiveGroup(group, state.groups);
+      if (activeGroup === state.activeGroup) return {};
+      return { activeGroup };
+    }),
   toggleEditMode: () => set((state) => ({ isEditMode: !state.isEditMode })),
   setDefaultPythonPath: (path) => set({ defaultPythonPath: path?.trim() || undefined }),
   setBackupDirectory: (path) => set({ backupDirectory: path?.trim() || undefined }),
@@ -823,11 +1011,12 @@ export const useStore = create<AppState>((set, get) => ({
         executionHistoryLimit: clampExecutionHistoryLimit(persisted.execution_history_limit),
         cards: normalized.cards,
         sectionMarkers: normalized.sectionMarkers,
+        groups: normalized.groups,
         backupDirectory: normalized.backupConfig.directory,
         backupRetentionCount: normalized.backupConfig.retention_count,
         backupAutoEnabled: normalized.backupConfig.auto_backup_enabled,
         backupSchedule: normalized.backupConfig.schedule,
-        activeGroup: persisted.activeGroup,
+        activeGroup: normalized.activeGroup,
         defaultPythonPath: persisted.default_python_path,
         dataPath: currentPath,
         isInitialized: true,
@@ -839,11 +1028,15 @@ export const useStore = create<AppState>((set, get) => ({
         persisted.backup_config?.retention_count !== normalized.backupConfig.retention_count ||
         persisted.backup_config?.auto_backup_enabled !== normalized.backupConfig.auto_backup_enabled ||
         JSON.stringify(persisted.backup_config?.schedule) !== JSON.stringify(normalized.backupConfig.schedule) ||
-        persisted.backup_config?.directory !== normalized.backupConfig.directory
+        persisted.backup_config?.directory !== normalized.backupConfig.directory ||
+        persisted.activeGroup !== normalized.activeGroup ||
+        JSON.stringify(persisted.groups ?? []) !== JSON.stringify(normalized.groups)
       ) {
         await storageService.save({
           ...persisted,
           dashboard_columns: normalized.dashboardColumns,
+          activeGroup: normalized.activeGroup,
+          groups: normalized.groups,
           cards: normalized.cards,
           section_markers: normalized.sectionMarkers,
           backup_config: normalized.backupConfig,
@@ -862,6 +1055,7 @@ export const useStore = create<AppState>((set, get) => ({
     set({
       cards,
       sectionMarkers: [],
+      groups: get().groups,
       dashboardColumns: get().dashboardColumns,
       dataPath: currentPath,
       isInitialized: true,
@@ -883,6 +1077,8 @@ export const useStore = create<AppState>((set, get) => ({
       ...settings,
       schema_version: STORAGE_SCHEMA_VERSION,
       dashboard_columns: normalized.dashboardColumns,
+      activeGroup: normalized.activeGroup,
+      groups: normalized.groups,
       cards: normalized.cards,
       section_markers: normalized.sectionMarkers,
       backup_config: normalized.backupConfig,
@@ -897,11 +1093,12 @@ export const useStore = create<AppState>((set, get) => ({
       executionHistoryLimit: clampExecutionHistoryLimit(settings.execution_history_limit),
       cards: normalized.cards,
       sectionMarkers: normalized.sectionMarkers,
+      groups: normalized.groups,
       backupDirectory: normalized.backupConfig.directory,
       backupRetentionCount: normalized.backupConfig.retention_count,
       backupAutoEnabled: normalized.backupConfig.auto_backup_enabled,
       backupSchedule: normalized.backupConfig.schedule,
-      activeGroup: settings.activeGroup,
+      activeGroup: normalized.activeGroup,
       defaultPythonPath: settings.default_python_path,
       dataPath: displayPath,
       isInitialized: true,
@@ -987,8 +1184,10 @@ export const useStore = create<AppState>((set, get) => ({
 
   addCard: (incomingCard) =>
     set((state) => {
+      const normalizedGroup = normalizeGroupName(incomingCard.group);
       const card = ensureCardLayoutScopes({
         ...incomingCard,
+        group: normalizedGroup,
         alert_config: normalizeAlertConfig(incomingCard.alert_config),
         alert_state: normalizeAlertState(incomingCard.alert_state),
         status: {
@@ -1015,9 +1214,481 @@ export const useStore = create<AppState>((set, get) => ({
         undefined,
         allPlacement,
       );
+      const cards = recalcSortOrder([...state.cards, withPlacement]);
+      const groups = normalizeGroupEntities(state.groups, cards, state.sectionMarkers, state.activeGroup);
+      const activeGroup = normalizeActiveGroup(state.activeGroup, groups);
 
-      return { cards: recalcSortOrder([...state.cards, withPlacement]) };
+      return { cards, groups, activeGroup };
     }),
+
+  duplicateCardsToGroup: (sourceGroupRaw, targetGroupRaw, cardIdsRaw) => {
+    const sourceGroup = String(sourceGroupRaw ?? '').trim();
+    const targetGroup = String(targetGroupRaw ?? '').trim();
+    const uniqueCardIds = uniqueIds(cardIdsRaw ?? []);
+    const report: GroupBatchResult = {
+      operation: 'copy_cards',
+      requestedCards: uniqueCardIds.length,
+      requestedSections: 0,
+      successCards: 0,
+      successSections: 0,
+      failures: [],
+    };
+
+    set((state) => {
+      const groupNames = orderedGroupNames(state.groups);
+      if (!groupNames.includes(sourceGroup)) {
+        report.failures.push({ entity: 'request', id: sourceGroup, reason: 'source_group_not_found' });
+        return {};
+      }
+      if (!targetGroup) {
+        report.failures.push({ entity: 'request', id: '', reason: 'target_group_required' });
+        return {};
+      }
+      if (!groupNames.includes(targetGroup)) {
+        report.failures.push({ entity: 'request', id: targetGroup, reason: 'target_group_invalid' });
+        return {};
+      }
+      if (uniqueCardIds.length === 0) {
+        report.failures.push({ entity: 'request', id: '', reason: 'no_targets' });
+        return {};
+      }
+
+      let cards = state.cards.slice();
+
+      uniqueCardIds.forEach((cardId) => {
+        const card = state.cards.find((item) => item.id === cardId);
+        if (!card) {
+          report.failures.push({ entity: 'card', id: cardId, reason: 'card_not_found' });
+          return;
+        }
+        if (card.status.is_deleted) {
+          report.failures.push({ entity: 'card', id: cardId, reason: 'card_deleted' });
+          return;
+        }
+        if (card.group !== sourceGroup) {
+          report.failures.push({ entity: 'card', id: cardId, reason: 'card_not_in_group' });
+          return;
+        }
+
+        const duplicated: Card = ensureCardLayoutScopes({
+          ...card,
+          id: crypto.randomUUID(),
+          title: `${card.title} (Copy)`,
+          group: targetGroup,
+          status: {
+            ...card.status,
+            is_deleted: false,
+            deleted_at: null,
+            sort_order: card.status.sort_order,
+          },
+          runtimeData: card.runtimeData,
+        });
+
+        const allPlacement = findPlacement(cards, duplicated.ui_config.size, state.dashboardColumns, 0);
+        const groupPlacement = findPlacement(
+          cards,
+          duplicated.ui_config.size,
+          state.dashboardColumns,
+          0,
+          undefined,
+          targetGroup,
+        );
+        const placed = setCardLayoutPosition(
+          setCardLayoutPosition(duplicated, targetGroup, groupPlacement),
+          undefined,
+          allPlacement,
+        );
+        cards = [...cards, placed];
+        report.successCards += 1;
+      });
+
+      if (report.successCards === 0) {
+        return {};
+      }
+
+      cards = recalcSortOrder(cards);
+      const groups = normalizeGroupEntities(state.groups, cards, state.sectionMarkers, state.activeGroup);
+      const activeGroup = normalizeActiveGroup(state.activeGroup, groups);
+
+      return { cards, groups, activeGroup };
+    });
+
+    return report;
+  },
+
+  executeGroupBatchAction: (request) => {
+    const sourceGroup = String(request.sourceGroup ?? '').trim();
+    const uniqueCardIds = uniqueIds(request.cardIds ?? []);
+    const uniqueSectionIds = uniqueIds(request.sectionIds ?? []);
+    const report: GroupBatchResult = {
+      operation: request.type,
+      requestedCards: uniqueCardIds.length,
+      requestedSections: uniqueSectionIds.length,
+      successCards: 0,
+      successSections: 0,
+      failures: [],
+    };
+
+    set((state) => {
+      const groupNames = orderedGroupNames(state.groups);
+      if (!groupNames.includes(sourceGroup)) {
+        report.failures.push({ entity: 'request', id: sourceGroup, reason: 'source_group_not_found' });
+        return {};
+      }
+      if (uniqueCardIds.length === 0 && uniqueSectionIds.length === 0) {
+        report.failures.push({ entity: 'request', id: '', reason: 'no_targets' });
+        return {};
+      }
+
+      const validCardIds = new Set<string>();
+      uniqueCardIds.forEach((cardId) => {
+        const card = state.cards.find((item) => item.id === cardId);
+        if (!card) {
+          report.failures.push({ entity: 'card', id: cardId, reason: 'card_not_found' });
+          return;
+        }
+        if (card.status.is_deleted) {
+          report.failures.push({ entity: 'card', id: cardId, reason: 'card_deleted' });
+          return;
+        }
+        if (card.group !== sourceGroup) {
+          report.failures.push({ entity: 'card', id: cardId, reason: 'card_not_in_group' });
+          return;
+        }
+        validCardIds.add(cardId);
+      });
+
+      const validSectionIds = new Set<string>();
+      uniqueSectionIds.forEach((sectionId) => {
+        const section = state.sectionMarkers.find((item) => item.id === sectionId);
+        if (!section) {
+          report.failures.push({ entity: 'section', id: sectionId, reason: 'section_not_found' });
+          return;
+        }
+        if (section.group !== sourceGroup) {
+          report.failures.push({ entity: 'section', id: sectionId, reason: 'section_not_in_group' });
+          return;
+        }
+        validSectionIds.add(sectionId);
+      });
+
+      if (request.type === 'update_interval') {
+        const intervalSec = Number(request.intervalSec);
+        if (!Number.isFinite(intervalSec) || intervalSec < 0) {
+          report.failures.push({ entity: 'request', id: String(request.intervalSec), reason: 'interval_invalid' });
+          return {};
+        }
+        validSectionIds.forEach((sectionId) => {
+          report.failures.push({ entity: 'section', id: sectionId, reason: 'section_operation_unsupported' });
+        });
+
+        if (validCardIds.size === 0) {
+          return {};
+        }
+
+        const cards = state.cards.map((card) => {
+          if (!validCardIds.has(card.id)) return card;
+          report.successCards += 1;
+          return {
+            ...card,
+            refresh_config: {
+              ...card.refresh_config,
+              interval_sec: Math.floor(intervalSec),
+            },
+          };
+        });
+
+        return { cards };
+      }
+
+      if (request.type === 'soft_delete') {
+        const now = new Date().toISOString();
+        const cards = recalcSortOrder(
+          state.cards.map((card) => {
+            if (!validCardIds.has(card.id)) return card;
+            report.successCards += 1;
+            return {
+              ...card,
+              status: {
+                ...card.status,
+                is_deleted: true,
+                deleted_at: now,
+              },
+            };
+          }),
+        );
+        const sectionMarkers = state.sectionMarkers.filter((section) => {
+          if (!validSectionIds.has(section.id)) return true;
+          report.successSections += 1;
+          return false;
+        });
+
+        const groups = normalizeGroupEntities(state.groups, cards, sectionMarkers, state.activeGroup);
+        const activeGroup = normalizeActiveGroup(state.activeGroup, groups);
+
+        return {
+          cards,
+          groups,
+          activeGroup,
+          sectionMarkers: sortSectionMarkers(sectionMarkers, groups),
+        };
+      }
+
+      const targetGroup = String(request.targetGroup ?? '').trim();
+      if (!targetGroup) {
+        report.failures.push({ entity: 'request', id: '', reason: 'target_group_required' });
+        return {};
+      }
+      if (!groupNames.includes(targetGroup)) {
+        report.failures.push({ entity: 'request', id: targetGroup, reason: 'target_group_invalid' });
+        return {};
+      }
+      if (targetGroup === sourceGroup) {
+        report.failures.push({ entity: 'request', id: targetGroup, reason: 'target_group_same' });
+        return {};
+      }
+
+      let cards = state.cards.map((card) => {
+        if (!validCardIds.has(card.id)) return card;
+        report.successCards += 1;
+        const changed = ensureCardLayoutScopes({
+          ...card,
+          group: targetGroup,
+        });
+        return renameCardLayoutScope(changed, sourceGroup, targetGroup);
+      });
+
+      if (report.successCards > 0) {
+        cards = reflowLayoutScope(cards, state.dashboardColumns, sourceGroup);
+        cards = reflowLayoutScope(cards, state.dashboardColumns, targetGroup);
+        cards = recalcSortOrder(cards);
+      }
+
+      const sectionMarkers = state.sectionMarkers.map((section) => {
+        if (!validSectionIds.has(section.id)) return section;
+        report.successSections += 1;
+        return {
+          ...section,
+          group: targetGroup,
+        };
+      });
+      const groups = normalizeGroupEntities(state.groups, cards, sectionMarkers, state.activeGroup);
+      const activeGroup = normalizeActiveGroup(state.activeGroup, groups);
+
+      return {
+        cards,
+        groups,
+        activeGroup,
+        sectionMarkers: sortSectionMarkers(sectionMarkers, groups),
+      };
+    });
+
+    return report;
+  },
+
+  createGroup: (rawName) => {
+    let result: GroupMutationResult = { ok: false, error: 'empty' };
+
+    set((state) => {
+      const name = String(rawName ?? '').trim();
+      if (!name) {
+        result = { ok: false, error: 'empty' };
+        return {};
+      }
+      if (isAllGroupName(name)) {
+        result = { ok: false, error: 'reserved' };
+        return {};
+      }
+      if (orderedGroupNames(state.groups).includes(name)) {
+        result = { ok: false, error: 'duplicate' };
+        return {};
+      }
+
+      const groups = normalizeGroupEntities(
+        [...state.groups, { name, order: state.groups.length }],
+        state.cards,
+        state.sectionMarkers,
+        state.activeGroup,
+      );
+      result = { ok: true };
+      return { groups };
+    });
+
+    return result;
+  },
+
+  renameGroup: (fromRaw, toRaw) => {
+    let result: GroupMutationResult = { ok: false, error: 'not_found' };
+
+    set((state) => {
+      const fromName = String(fromRaw ?? '').trim();
+      const toName = String(toRaw ?? '').trim();
+      if (!fromName || !orderedGroupNames(state.groups).includes(fromName)) {
+        result = { ok: false, error: 'not_found' };
+        return {};
+      }
+      if (!toName) {
+        result = { ok: false, error: 'empty' };
+        return {};
+      }
+      if (isAllGroupName(toName)) {
+        result = { ok: false, error: 'reserved' };
+        return {};
+      }
+      if (fromName !== toName && orderedGroupNames(state.groups).includes(toName)) {
+        result = { ok: false, error: 'duplicate' };
+        return {};
+      }
+      if (fromName === toName) {
+        result = { ok: true };
+        return {};
+      }
+
+      const cards = recalcSortOrder(
+        state.cards.map((card) => {
+          if (card.group !== fromName) return card;
+          const nextCard = ensureCardLayoutScopes({
+            ...card,
+            group: toName,
+          });
+          return renameCardLayoutScope(nextCard, fromName, toName);
+        }),
+      );
+      const sectionMarkers = state.sectionMarkers.map((section) =>
+        section.group === fromName ? { ...section, group: toName } : section,
+      );
+      const renamedGroups = state.groups.map((group) =>
+        group.name === fromName ? { ...group, name: toName } : group,
+      );
+      const nextActiveGroupCandidate = state.activeGroup === fromName ? toName : state.activeGroup;
+      const groups = normalizeGroupEntities(renamedGroups, cards, sectionMarkers, nextActiveGroupCandidate);
+      const activeGroup = normalizeActiveGroup(nextActiveGroupCandidate, groups);
+
+      result = { ok: true };
+      return {
+        cards,
+        groups,
+        activeGroup,
+        sectionMarkers: sortSectionMarkers(sectionMarkers, groups),
+      };
+    });
+
+    return result;
+  },
+
+  reorderGroups: (orderedNamesRaw) =>
+    set((state) => {
+      const currentNames = orderedGroupNames(state.groups);
+      const currentSet = new Set(currentNames);
+      const nextNames: string[] = [];
+      const seen = new Set<string>();
+
+      orderedNamesRaw.forEach((name) => {
+        const normalized = String(name ?? '').trim();
+        if (!normalized || seen.has(normalized)) return;
+        if (!currentSet.has(normalized)) return;
+        seen.add(normalized);
+        nextNames.push(normalized);
+      });
+
+      currentNames.forEach((name) => {
+        if (seen.has(name)) return;
+        nextNames.push(name);
+      });
+
+      if (nextNames.length === 0) return {};
+      if (nextNames.length === currentNames.length && nextNames.every((name, index) => name === currentNames[index])) {
+        return {};
+      }
+
+      const groups = nextNames.map((name, order) => ({ name, order }));
+      return {
+        groups,
+        sectionMarkers: sortSectionMarkers(state.sectionMarkers, groups),
+      };
+    }),
+
+  deleteGroup: (nameRaw, targetRaw) => {
+    let result: GroupMutationResult = { ok: false, error: 'not_found' };
+
+    set((state) => {
+      const name = String(nameRaw ?? '').trim();
+      const groupNames = orderedGroupNames(state.groups);
+      if (!name || !groupNames.includes(name)) {
+        result = { ok: false, error: 'not_found' };
+        return {};
+      }
+      if (groupNames.length <= 1) {
+        result = { ok: false, error: 'last_group' };
+        return {};
+      }
+
+      const cardsToMove = state.cards.filter((card) => card.group === name);
+      const markersToMove = state.sectionMarkers.filter((section) => section.group === name);
+      const migrationRequired = cardsToMove.length > 0 || markersToMove.length > 0;
+      const target = targetRaw ? String(targetRaw).trim() : '';
+
+      if (migrationRequired && !target) {
+        result = { ok: false, error: 'target_required' };
+        return {};
+      }
+      if (target && target === name) {
+        result = { ok: false, error: 'target_same' };
+        return {};
+      }
+      if (target && !groupNames.includes(target)) {
+        result = { ok: false, error: 'target_invalid' };
+        return {};
+      }
+
+      let cards = state.cards;
+      if (target) {
+        cards = cards.map((card) => {
+          if (card.group !== name) return card;
+          const renamed = renameCardLayoutScope(
+            ensureCardLayoutScopes({
+              ...card,
+              group: target,
+            }),
+            name,
+            target,
+          );
+          return renamed;
+        });
+        cards = reflowLayoutScope(cards, state.dashboardColumns, target);
+        cards = recalcSortOrder(cards);
+      }
+
+      const nextSectionMarkers = state.sectionMarkers
+        .map((section) => {
+          if (section.group !== name) return section;
+          if (!target) return null;
+          return {
+            ...section,
+            group: target,
+          };
+        })
+        .filter((section): section is SectionMarker => Boolean(section));
+
+      const groups = groupNames
+        .filter((groupName) => groupName !== name)
+        .map((groupName, order) => ({ name: groupName, order }));
+
+      const activeGroup = state.activeGroup === name
+        ? (target || RESERVED_ALL_GROUP)
+        : normalizeActiveGroup(state.activeGroup, groups);
+
+      result = { ok: true };
+      return {
+        cards,
+        groups,
+        activeGroup,
+        sectionMarkers: sortSectionMarkers(nextSectionMarkers, groups),
+      };
+    });
+
+    return result;
+  },
 
   addSectionMarker: (incomingSection) =>
     set((state) => {
@@ -1033,9 +1704,12 @@ export const useStore = create<AppState>((set, get) => ({
         line_width: incomingSection.line_width ?? 2,
         label_align: incomingSection.label_align ?? 'center',
       }, state.dashboardColumns);
+      const nextMarkers = [...state.sectionMarkers, section];
+      const groups = normalizeGroupEntities(state.groups, state.cards, nextMarkers, state.activeGroup);
 
       return {
-        sectionMarkers: sortSectionMarkers([...state.sectionMarkers, section]),
+        groups,
+        sectionMarkers: sortSectionMarkers(nextMarkers, groups),
       };
     }),
 
@@ -1049,27 +1723,44 @@ export const useStore = create<AppState>((set, get) => ({
           id: section.id,
         }, state.dashboardColumns);
       });
-      return { sectionMarkers: sortSectionMarkers(updated) };
+      const groups = normalizeGroupEntities(state.groups, state.cards, updated, state.activeGroup);
+      return { groups, sectionMarkers: sortSectionMarkers(updated, groups) };
     }),
 
   removeSectionMarker: (id) =>
-    set((state) => ({
-      sectionMarkers: state.sectionMarkers.filter((section) => section.id !== id),
-    })),
+    set((state) => {
+      const sectionMarkers = state.sectionMarkers.filter((section) => section.id !== id);
+      return {
+        sectionMarkers: sortSectionMarkers(sectionMarkers, state.groups),
+      };
+    }),
 
   updateCard: (id, updates) =>
     set((state) => {
       const updatedCards = state.cards.map((card) => {
         if (card.id !== id) return card;
 
-        const merged = ensureCardLayoutScopes(mergeCard(card, updates));
-        if (!updates.group || updates.group === card.group) return merged;
+        const nextGroup = updates.group ? normalizeGroupName(updates.group) : card.group;
+        const sanitizedUpdates: Partial<Card> = {
+          ...updates,
+          group: nextGroup,
+        };
+        if (isAllGroupName(nextGroup)) {
+          sanitizedUpdates.group = card.group;
+        }
+
+        const merged = ensureCardLayoutScopes(mergeCard(card, sanitizedUpdates));
+        if (!sanitizedUpdates.group || sanitizedUpdates.group === card.group) return merged;
 
         const previousGroupPosition = getCardLayoutPosition(card, card.group);
-        return setCardLayoutPosition(merged, updates.group, previousGroupPosition);
+        const withNewPosition = setCardLayoutPosition(merged, sanitizedUpdates.group, previousGroupPosition);
+        return renameCardLayoutScope(withNewPosition, card.group, sanitizedUpdates.group);
       });
+      const cards = recalcSortOrder(updatedCards);
+      const groups = normalizeGroupEntities(state.groups, cards, state.sectionMarkers, state.activeGroup);
+      const activeGroup = normalizeActiveGroup(state.activeGroup, groups);
 
-      return { cards: recalcSortOrder(updatedCards) };
+      return { cards, groups, activeGroup };
     }),
 
   moveCard: (id, x, y, scopeGroup) => {

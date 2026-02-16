@@ -110,6 +110,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
   const {
     cards,
     sectionMarkers,
+    groups,
     activeGroup,
     dashboardColumns,
     setActiveGroup,
@@ -167,10 +168,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
     [activeGroup, visibleCards],
   );
 
-  const groups = useMemo(() => {
-    const groupSet = new Set(visibleCards.map((card) => card.group));
-    return ['All', ...Array.from(groupSet).sort()];
-  }, [visibleCards]);
+  const groupTabs = useMemo(() => ['All', ...groups.map((group) => group.name)], [groups]);
 
   const maxRow = useMemo(() => {
     let maxCardRow = 0;
@@ -445,7 +443,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
       </div>
 
       <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide shrink-0">
-        {groups.map((group) => (
+        {groupTabs.map((group) => (
           <button
             key={group}
             onClick={() => setActiveGroup(group)}
