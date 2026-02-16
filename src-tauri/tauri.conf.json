@@ -15,7 +15,7 @@
         "title": "MyMetrics",
         "width": 1380,
         "height": 860,
-        "minWidth": 1100,
+        "minWidth": 730,
         "minHeight": 720,
         "resizable": true,
         "fullscreen": false

@@ -4,6 +4,7 @@ import { Moon, Sun, Folder, RefreshCw, Info, TerminalSquare } from 'lucide-react
 import { Button } from './ui/Button';
 import { open } from '@tauri-apps/plugin-dialog';
 import { t } from '../i18n';
+import { MAX_DASHBOARD_COLUMNS, MIN_DASHBOARD_COLUMNS } from '../grid';
 
 export const Settings = () => {
   const {
@@ -11,6 +12,8 @@ export const Settings = () => {
     setTheme,
     language,
     setLanguage,
+    dashboardColumns,
+    setDashboardColumns,
     dataPath,
     updateDataPath,
     defaultPythonPath,
@@ -100,6 +103,27 @@ export const Settings = () => {
             >
               <option value="en-US">{tr('settings.languageEnglish')}</option>
               <option value="zh-CN">{tr('settings.languageChinese')}</option>
+            </select>
+          </div>
+
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <div className="space-y-1">
+              <p className="font-medium">{tr('settings.dashboardColumns')}</p>
+              <p className="text-sm text-muted-foreground">{tr('settings.dashboardColumnsDesc')}</p>
+            </div>
+            <select
+              value={dashboardColumns}
+              onChange={(event) => setDashboardColumns(Number.parseInt(event.target.value, 10))}
+              className="bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              {Array.from(
+                { length: MAX_DASHBOARD_COLUMNS - MIN_DASHBOARD_COLUMNS + 1 },
+                (_, index) => MIN_DASHBOARD_COLUMNS + index,
+              ).map((columns) => (
+                <option key={columns} value={columns}>
+                  {columns}
+                </option>
+              ))}
             </select>
           </div>
         </div>

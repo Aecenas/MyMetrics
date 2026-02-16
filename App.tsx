@@ -6,6 +6,17 @@ import { RecycleBin } from './components/RecycleBin';
 import { Settings } from './components/Settings';
 import { CreationWizard } from './components/CreationWizard';
 import { storageService } from './services/storage';
+import { clampDashboardColumns, DEFAULT_DASHBOARD_COLUMNS } from './grid';
+
+const DEFAULT_WINDOW_WIDTH = 1380;
+const SIDEBAR_EXPANDED_WIDTH = 256;
+const SIDEBAR_COLLAPSED_WIDTH = 64;
+const DEFAULT_RIGHT_WIDTH_EXPANDED = DEFAULT_WINDOW_WIDTH - SIDEBAR_EXPANDED_WIDTH;
+const DEFAULT_RIGHT_WIDTH_COLLAPSED = DEFAULT_WINDOW_WIDTH - SIDEBAR_COLLAPSED_WIDTH;
+const WINDOW_MIN_HEIGHT = 720;
+const WINDOW_DEFAULT_HEIGHT = 860;
+
+const isTauri = () => typeof window !== 'undefined' && Boolean((window as any).__TAURI_INTERNALS__);
 
 const App: React.FC = () => {
   const {
@@ -16,6 +27,7 @@ const App: React.FC = () => {
     initializeStore,
     isInitialized,
     cards,
+    dashboardColumns,
     refreshAllCards,
     refreshCard,
   } = useStore();
@@ -48,6 +60,34 @@ const App: React.FC = () => {
   }, [language]);
 
   useEffect(() => {
+    if (!isTauri()) return;
+
+    const columns = clampDashboardColumns(dashboardColumns);
+    const sidebarWidth = sidebarOpen ? SIDEBAR_EXPANDED_WIDTH : SIDEBAR_COLLAPSED_WIDTH;
+    const baselineRightWidth = sidebarOpen ? DEFAULT_RIGHT_WIDTH_EXPANDED : DEFAULT_RIGHT_WIDTH_COLLAPSED;
+    const rightWidthScale = columns / DEFAULT_DASHBOARD_COLUMNS;
+    const targetRightWidth = Math.round(baselineRightWidth * rightWidthScale);
+    const targetWidth = sidebarWidth + targetRightWidth;
+
+    const resizeWindow = async () => {
+      try {
+        const { getCurrentWindow, LogicalSize } = await import('@tauri-apps/api/window');
+        const appWindow = getCurrentWindow();
+
+        await appWindow.setMinSize(new LogicalSize(targetWidth, WINDOW_MIN_HEIGHT));
+
+        const outerSize = await appWindow.outerSize();
+        const targetHeight = Math.max(outerSize.height, WINDOW_DEFAULT_HEIGHT, WINDOW_MIN_HEIGHT);
+        await appWindow.setSize(new LogicalSize(targetWidth, targetHeight));
+      } catch (error) {
+        console.error('Failed to update window size for dashboard columns', error);
+      }
+    };
+
+    resizeWindow();
+  }, [dashboardColumns, sidebarOpen]);
+
+  useEffect(() => {
     const unsub = useStore.subscribe((state) => {
       if (!state.isInitialized) return;
 
@@ -57,6 +97,7 @@ const App: React.FC = () => {
           schema_version: 1,
           theme: state.theme,
           language: state.language,
+          dashboard_columns: state.dashboardColumns,
           cards: state.cards,
           section_markers: state.sectionMarkers,
           activeGroup: state.activeGroup,

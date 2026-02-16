@@ -3,8 +3,8 @@ import { Card, CardRuntimeData, AppSettings, ViewMode, AppLanguage, SectionMarke
 import { storageService } from './services/storage';
 import { executionService } from './services/execution';
 import { ensureCardLayoutScopes, getCardLayoutPosition, setCardLayoutPosition } from './layout';
+import { clampDashboardColumns, DEFAULT_DASHBOARD_COLUMNS } from './grid';
 
-const GRID_COLUMNS = 4;
 const LEGACY_SAMPLE_IDS = new Set(['1', '2', '3', '4']);
 const LEGACY_SAMPLE_TITLES = new Set(['Server CPU', 'RAM Usage', 'Traffic Trend', 'Weather Status']);
 
@@ -20,11 +20,12 @@ const getCardSize = (size: Card['ui_config']['size']) => ({
   h: size.endsWith('2') ? 2 : 1,
 });
 
-const normalizeSectionMarker = (marker: SectionMarker): SectionMarker => {
-  const start_col = Math.max(0, Math.min(GRID_COLUMNS - 1, Math.floor(Number(marker.start_col) || 0)));
+const normalizeSectionMarker = (marker: SectionMarker, columns: number): SectionMarker => {
+  const normalizedColumns = clampDashboardColumns(columns);
+  const start_col = Math.max(0, Math.min(normalizedColumns - 1, Math.floor(Number(marker.start_col) || 0)));
   const span_col = Math.max(
     1,
-    Math.min(GRID_COLUMNS - start_col, Math.floor(Number(marker.span_col) || 1)),
+    Math.min(normalizedColumns - start_col, Math.floor(Number(marker.span_col) || 1)),
   );
   const line_color: SectionMarker['line_color'] = ['primary', 'red', 'green', 'blue', 'amber'].includes(
     marker.line_color,
@@ -66,7 +67,8 @@ const sortSectionMarkers = (markers: SectionMarker[]) =>
 const rangesOverlap = (startA: number, lengthA: number, startB: number, lengthB: number) =>
   startA < startB + lengthB && startA + lengthA > startB;
 
-const isWithinGrid = (x: number, y: number, w: number, h: number) => x >= 0 && y >= 0 && x + w <= GRID_COLUMNS;
+const isWithinGrid = (x: number, y: number, w: number, h: number, columns: number) =>
+  x >= 0 && y >= 0 && x + w <= columns;
 
 const getCollidingCards = (
   cards: Card[],
@@ -168,14 +170,16 @@ const findNextY = (cards: Card[], scopeGroup?: string) => {
 const findPlacement = (
   cards: Card[],
   size: Card['ui_config']['size'],
+  columns: number,
   startY = 0,
   excludeId?: string,
   scopeGroup?: string,
 ) => {
+  const normalizedColumns = clampDashboardColumns(columns);
   const { w, h } = getCardSize(size);
 
   for (let y = startY; y < startY + 200; y += 1) {
-    for (let x = 0; x <= GRID_COLUMNS - w; x += 1) {
+    for (let x = 0; x <= normalizedColumns - w; x += 1) {
       if (!checkCollision(cards, x, y, w, h, excludeId, scopeGroup)) {
         return { x, y };
       }
@@ -183,6 +187,101 @@ const findPlacement = (
   }
 
   return { x: 0, y: startY };
+};
+
+interface LayoutRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+const hasRectCollision = (rects: LayoutRect[], x: number, y: number, w: number, h: number) =>
+  rects.some((rect) => x < rect.x + rect.w && x + w > rect.x && y < rect.y + rect.h && y + h > rect.y);
+
+const findReflowPlacement = (
+  occupiedRects: LayoutRect[],
+  w: number,
+  h: number,
+  columns: number,
+  preferredX: number,
+  preferredY: number,
+) => {
+  const clampedX = Math.max(0, Math.min(columns - w, Math.floor(preferredX)));
+  const startY = Math.max(0, Math.floor(preferredY));
+
+  if (!hasRectCollision(occupiedRects, clampedX, startY, w, h)) {
+    return { x: clampedX, y: startY };
+  }
+
+  for (let x = 0; x <= columns - w; x += 1) {
+    if (!hasRectCollision(occupiedRects, x, startY, w, h)) {
+      return { x, y: startY };
+    }
+  }
+
+  for (let y = startY + 1; y < startY + 500; y += 1) {
+    for (let x = 0; x <= columns - w; x += 1) {
+      if (!hasRectCollision(occupiedRects, x, y, w, h)) {
+        return { x, y };
+      }
+    }
+  }
+
+  return { x: 0, y: startY };
+};
+
+const reflowLayoutScope = (cards: Card[], columns: number, scopeGroup?: string) => {
+  const normalizedColumns = clampDashboardColumns(columns);
+  const candidates = cards
+    .filter((card) => !card.status.is_deleted)
+    .filter((card) => (scopeGroup ? card.group === scopeGroup : true))
+    .slice()
+    .sort((a, b) => {
+      const posA = getCardLayoutPosition(a, scopeGroup);
+      const posB = getCardLayoutPosition(b, scopeGroup);
+      if (posA.y !== posB.y) return posA.y - posB.y;
+      if (posA.x !== posB.x) return posA.x - posB.x;
+      if (a.status.sort_order !== b.status.sort_order) return a.status.sort_order - b.status.sort_order;
+      return a.id.localeCompare(b.id);
+    });
+
+  const occupiedRects: LayoutRect[] = [];
+  const placements = new Map<string, { x: number; y: number }>();
+
+  candidates.forEach((card) => {
+    const { w, h } = getCardSize(card.ui_config.size);
+    const currentPosition = getCardLayoutPosition(card, scopeGroup);
+    const placement = findReflowPlacement(
+      occupiedRects,
+      w,
+      h,
+      normalizedColumns,
+      currentPosition.x,
+      currentPosition.y,
+    );
+    placements.set(card.id, placement);
+    occupiedRects.push({ x: placement.x, y: placement.y, w, h });
+  });
+
+  return cards.map((card) => {
+    const placement = placements.get(card.id);
+    if (!placement) return card;
+    return setCardLayoutPosition(card, scopeGroup, placement);
+  });
+};
+
+const reflowCardsForColumns = (cards: Card[], columns: number): Card[] => {
+  const normalizedColumns = clampDashboardColumns(columns);
+  const withScopes = cards.map((card) => ensureCardLayoutScopes(card));
+
+  let next = reflowLayoutScope(withScopes, normalizedColumns);
+  const groups = Array.from(new Set(next.map((card) => card.group).filter((group) => group.trim().length > 0))).sort();
+  groups.forEach((group) => {
+    next = reflowLayoutScope(next, normalizedColumns, group);
+  });
+
+  return next;
 };
 
 const recalcSortOrder = (cards: Card[]): Card[] => {
@@ -296,6 +395,7 @@ interface AppState {
 
   theme: 'dark' | 'light';
   language: AppLanguage;
+  dashboardColumns: number;
   cards: Card[];
   sectionMarkers: SectionMarker[];
   dataPath: string;
@@ -303,6 +403,7 @@ interface AppState {
 
   setTheme: (theme: 'dark' | 'light') => void;
   setLanguage: (language: AppLanguage) => void;
+  setDashboardColumns: (columns: number) => void;
   setView: (view: ViewMode) => void;
   toggleSidebar: () => void;
   setActiveGroup: (group: string) => void;
@@ -341,6 +442,7 @@ export const useStore = create<AppState>((set, get) => ({
   activeGroup: 'All',
   theme: 'dark',
   language: 'en-US',
+  dashboardColumns: DEFAULT_DASHBOARD_COLUMNS,
   isEditMode: false,
   isInitialized: false,
   cards: [],
@@ -350,6 +452,22 @@ export const useStore = create<AppState>((set, get) => ({
 
   setTheme: (theme) => set({ theme }),
   setLanguage: (language) => set({ language }),
+  setDashboardColumns: (columns) =>
+    set((state) => {
+      const normalizedColumns = clampDashboardColumns(columns);
+      if (normalizedColumns === state.dashboardColumns) return {};
+
+      const cards = recalcSortOrder(reflowCardsForColumns(state.cards, normalizedColumns));
+      const sectionMarkers = sortSectionMarkers(
+        state.sectionMarkers.map((marker) => normalizeSectionMarker(marker, normalizedColumns)),
+      );
+
+      return {
+        dashboardColumns: normalizedColumns,
+        cards,
+        sectionMarkers,
+      };
+    }),
   setView: (view) => set({ currentView: view }),
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
   setActiveGroup: (group) => set({ activeGroup: group }),
@@ -363,25 +481,35 @@ export const useStore = create<AppState>((set, get) => ({
     const persisted = await storageService.load();
 
     if (persisted) {
+      const dashboardColumns = clampDashboardColumns(persisted.dashboard_columns);
       const cleanedCards = persisted.cards.filter((card) => !isLegacySampleCard(card));
       const hydratedCards = recalcSortOrder(
-        cleanedCards.map(hydrateRuntimeData).map((card) => ensureCardLayoutScopes(card)),
+        reflowCardsForColumns(
+          cleanedCards.map(hydrateRuntimeData).map((card) => ensureCardLayoutScopes(card)),
+          dashboardColumns,
+        ),
+      );
+      const sectionMarkers = sortSectionMarkers(
+        (persisted.section_markers ?? []).map((section) => normalizeSectionMarker(section, dashboardColumns)),
       );
       set({
         theme: persisted.theme,
         language: persisted.language,
+        dashboardColumns,
         cards: hydratedCards,
-        sectionMarkers: sortSectionMarkers(persisted.section_markers ?? []),
+        sectionMarkers,
         activeGroup: persisted.activeGroup,
         defaultPythonPath: persisted.default_python_path,
         dataPath: currentPath,
         isInitialized: true,
       });
 
-      if (cleanedCards.length !== persisted.cards.length) {
+      if (cleanedCards.length !== persisted.cards.length || persisted.dashboard_columns !== dashboardColumns) {
         await storageService.save({
           ...persisted,
+          dashboard_columns: dashboardColumns,
           cards: hydratedCards,
+          section_markers: sectionMarkers,
         });
       }
       return;
@@ -392,6 +520,7 @@ export const useStore = create<AppState>((set, get) => ({
       schema_version: 1,
       theme: get().theme,
       language: get().language,
+      dashboard_columns: get().dashboardColumns,
       activeGroup: get().activeGroup,
       cards: hydratedCards,
       section_markers: [],
@@ -401,6 +530,7 @@ export const useStore = create<AppState>((set, get) => ({
     set({
       cards: hydratedCards,
       sectionMarkers: [],
+      dashboardColumns: get().dashboardColumns,
       dataPath: currentPath,
       isInitialized: true,
     });
@@ -453,11 +583,18 @@ export const useStore = create<AppState>((set, get) => ({
         (card) => !card.status.is_deleted && card.id !== id && card.group === target.group,
       );
       const startY = findNextY(visibleCards, target.group);
-      const groupPlacement = findPlacement(baseCards, target.ui_config.size, startY, id, target.group);
+      const groupPlacement = findPlacement(
+        baseCards,
+        target.ui_config.size,
+        state.dashboardColumns,
+        startY,
+        id,
+        target.group,
+      );
 
       const allVisibleCards = baseCards.filter((card) => !card.status.is_deleted && card.id !== id);
       const allStartY = findNextY(allVisibleCards);
-      const allPlacement = findPlacement(baseCards, target.ui_config.size, allStartY, id);
+      const allPlacement = findPlacement(baseCards, target.ui_config.size, state.dashboardColumns, allStartY, id);
 
       const placedCards = baseCards.map((card) =>
         card.id === id
@@ -496,8 +633,15 @@ export const useStore = create<AppState>((set, get) => ({
         },
       });
 
-      const allPlacement = findPlacement(state.cards, card.ui_config.size, 0);
-      const groupPlacement = findPlacement(state.cards, card.ui_config.size, 0, undefined, card.group);
+      const allPlacement = findPlacement(state.cards, card.ui_config.size, state.dashboardColumns, 0);
+      const groupPlacement = findPlacement(
+        state.cards,
+        card.ui_config.size,
+        state.dashboardColumns,
+        0,
+        undefined,
+        card.group,
+      );
       const withPlacement = setCardLayoutPosition(
         setCardLayoutPosition(card, card.group, groupPlacement),
         undefined,
@@ -520,7 +664,7 @@ export const useStore = create<AppState>((set, get) => ({
         line_style: incomingSection.line_style ?? 'dashed',
         line_width: incomingSection.line_width ?? 2,
         label_align: incomingSection.label_align ?? 'center',
-      });
+      }, state.dashboardColumns);
 
       return {
         sectionMarkers: sortSectionMarkers([...state.sectionMarkers, section]),
@@ -535,7 +679,7 @@ export const useStore = create<AppState>((set, get) => ({
           ...section,
           ...updates,
           id: section.id,
-        });
+        }, state.dashboardColumns);
       });
       return { sectionMarkers: sortSectionMarkers(updated) };
     }),
@@ -575,7 +719,7 @@ export const useStore = create<AppState>((set, get) => ({
       const isSingleStepMove = Math.abs(dx) + Math.abs(dy) === 1;
 
       const { w, h } = getCardSize(card.ui_config.size);
-      if (!isWithinGrid(x, y, w, h)) return { cards: state.cards };
+      if (!isWithinGrid(x, y, w, h, state.dashboardColumns)) return { cards: state.cards };
 
       const blockingCards = getCollidingCards(state.cards, x, y, w, h, id, scopeGroup);
       if (blockingCards.length === 0) {
@@ -616,7 +760,9 @@ export const useStore = create<AppState>((set, get) => ({
       if (dy === 1) leapTarget.y = blockerPosition.y + blockerSize.h;
       if (dy === -1) leapTarget.y = blockerPosition.y - h;
 
-      if (!isWithinGrid(leapTarget.x, leapTarget.y, w, h)) return { cards: state.cards };
+      if (!isWithinGrid(leapTarget.x, leapTarget.y, w, h, state.dashboardColumns)) {
+        return { cards: state.cards };
+      }
       if (checkCollision(state.cards, leapTarget.x, leapTarget.y, w, h, id, scopeGroup)) {
         return { cards: state.cards };
       }

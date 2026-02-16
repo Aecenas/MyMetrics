@@ -16,7 +16,6 @@ interface DashboardProps {
   onEditCard: (cardId: string) => void;
 }
 
-const GRID_COLUMNS = 4;
 const GRID_ROW_HEIGHT = 180;
 const GRID_COLUMN_GAP = 16;
 const GRID_GAP = 24;
@@ -111,6 +110,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
     cards,
     sectionMarkers,
     activeGroup,
+    dashboardColumns,
     setActiveGroup,
     isEditMode,
     toggleEditMode,
@@ -475,11 +475,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
           </div>
         ) : (
           <div
-            className="grid grid-cols-4 auto-rows-[180px] pb-20 relative"
+            className="grid auto-rows-[180px] pb-20 relative"
             style={{
               paddingTop: `${SECTION_TOP_PADDING}px`,
               rowGap: `${GRID_GAP}px`,
               columnGap: `${GRID_COLUMN_GAP}px`,
+              gridTemplateColumns: `repeat(${dashboardColumns}, minmax(0, 1fr))`,
               minHeight: isEditMode ? `${SECTION_TOP_PADDING + maxRow * GRID_CELL_SPAN}px` : 'auto',
             }}
           >
@@ -507,7 +508,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
               })}
             {displayedSections.map((section) => (
               <div key={section.id} className="absolute z-30 pointer-events-none" style={createSectionStyle(section)}>
-                <div className="grid grid-cols-4 gap-4 -translate-y-1/2">
+                <div
+                  className="grid -translate-y-1/2"
+                  style={{
+                    gridTemplateColumns: `repeat(${dashboardColumns}, minmax(0, 1fr))`,
+                    columnGap: `${GRID_COLUMN_GAP}px`,
+                  }}
+                >
                   <div
                     className="relative"
                     style={{

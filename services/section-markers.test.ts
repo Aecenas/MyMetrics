@@ -3,7 +3,7 @@ import { useStore } from '../store';
 
 describe('section marker store behavior', () => {
   beforeEach(() => {
-    useStore.setState({ sectionMarkers: [] });
+    useStore.setState({ sectionMarkers: [], dashboardColumns: 4 });
   });
 
   it('normalizes and updates section markers within grid bounds', () => {

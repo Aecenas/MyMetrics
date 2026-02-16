@@ -9,6 +9,7 @@ import {
 } from '../types';
 import { t } from '../i18n';
 import { ensureCardLayoutScopes } from '../layout';
+import { clampDashboardColumns } from '../grid';
 
 const POINTER_FILENAME = 'storage_config.json';
 const DATA_FILENAME = 'user_settings.json';
@@ -151,9 +152,10 @@ const deriveCacheFromLegacyRuntime = (legacyRuntimeData: any) => {
   };
 };
 
-const normalizeSectionMarker = (rawMarker: any, index: number): SectionMarker => {
-  const startCol = Math.max(0, Math.min(3, Math.floor(Number(rawMarker?.start_col ?? 0))));
-  const maxSpan = 4 - startCol;
+const normalizeSectionMarker = (rawMarker: any, index: number, columns: number): SectionMarker => {
+  const normalizedColumns = clampDashboardColumns(columns);
+  const startCol = Math.max(0, Math.min(normalizedColumns - 1, Math.floor(Number(rawMarker?.start_col ?? 0))));
+  const maxSpan = normalizedColumns - startCol;
   const spanCol = Math.max(1, Math.min(maxSpan, Math.floor(Number(rawMarker?.span_col ?? 2))));
   const lineColorRaw = String(rawMarker?.line_color ?? 'primary');
   const lineStyleRaw = String(rawMarker?.line_style ?? 'dashed');
@@ -241,15 +243,19 @@ const normalizeCard = (rawCard: any, index: number): Card => {
 };
 
 const migrateToV1 = (input: any): AppSettings => {
+  const dashboard_columns = clampDashboardColumns(input?.dashboard_columns);
   const cardsRaw = Array.isArray(input?.cards) ? input.cards : [];
   const cards = cardsRaw.map((card: any, index: number) => normalizeCard(card, index));
   const sectionRaw = Array.isArray(input?.section_markers) ? input.section_markers : [];
-  const sectionMarkers = sectionRaw.map((marker: any, index: number) => normalizeSectionMarker(marker, index));
+  const sectionMarkers = sectionRaw.map((marker: any, index: number) =>
+    normalizeSectionMarker(marker, index, dashboard_columns),
+  );
 
   return {
     schema_version: SCHEMA_VERSION,
     theme: input?.theme === 'light' ? 'light' : 'dark',
     language: normalizeLanguage(input?.language),
+    dashboard_columns,
     activeGroup: typeof input?.activeGroup === 'string' ? input.activeGroup : 'All',
     cards,
     section_markers: sectionMarkers,
@@ -259,6 +265,7 @@ const migrateToV1 = (input: any): AppSettings => {
 };
 
 const sanitizeForSave = (settings: AppSettings): AppSettings => {
+  const dashboard_columns = clampDashboardColumns((settings as Partial<AppSettings>).dashboard_columns);
   const cards = settings.cards.map((card, index) => {
     const normalizedCard = ensureCardLayoutScopes(card);
     return {
@@ -279,12 +286,13 @@ const sanitizeForSave = (settings: AppSettings): AppSettings => {
   const sectionRaw = Array.isArray((settings as Partial<AppSettings>).section_markers)
     ? (settings as Partial<AppSettings>).section_markers
     : [];
-  const section_markers = sectionRaw.map((marker, index) => normalizeSectionMarker(marker, index));
+  const section_markers = sectionRaw.map((marker, index) => normalizeSectionMarker(marker, index, dashboard_columns));
 
   return {
     schema_version: SCHEMA_VERSION,
     theme: settings.theme === 'light' ? 'light' : 'dark',
     language: normalizeLanguage((settings as Partial<AppSettings>).language),
+    dashboard_columns,
     activeGroup: typeof settings.activeGroup === 'string' ? settings.activeGroup : 'All',
     section_markers,
     default_python_path: settings.default_python_path,

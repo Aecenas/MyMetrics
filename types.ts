@@ -161,6 +161,7 @@ export interface AppSettings {
   schema_version: number;
   theme: 'dark' | 'light';
   language: AppLanguage;
+  dashboard_columns: number;
   activeGroup: string;
   cards: Card[];
   section_markers: SectionMarker[];
