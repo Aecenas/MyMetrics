@@ -65,6 +65,9 @@ type GroupMutationError =
 
 type GroupMutationResult = { ok: true } | { ok: false; error: GroupMutationError };
 
+type DuplicateCardError = 'not_found' | 'deleted' | 'empty_title' | 'invalid_group';
+type DuplicateCardResult = { ok: true; newCardId: string } | { ok: false; error: DuplicateCardError };
+
 export type GroupBatchOperationType = 'move_group' | 'update_interval' | 'soft_delete' | 'copy_cards';
 
 export type GroupBatchFailureReason =
@@ -901,6 +904,7 @@ interface AppState {
   hardDeleteCard: (id: string) => void;
   clearRecycleBin: () => void;
   addCard: (card: Card) => void;
+  duplicateCard: (id: string, overrides?: { title?: string; group?: string }) => DuplicateCardResult;
   duplicateCardsToGroup: (sourceGroup: string, targetGroup: string, cardIds: string[]) => GroupBatchResult;
   createGroup: (name: string) => GroupMutationResult;
   renameGroup: (fromName: string, toName: string) => GroupMutationResult;
@@ -967,8 +971,8 @@ export const useStore = create<AppState>((set, get) => ({
   currentView: 'dashboard',
   sidebarOpen: true,
   activeGroup: 'All',
-  theme: 'dark',
-  language: 'en-US',
+  theme: 'light',
+  language: 'zh-CN',
   dashboardColumns: DEFAULT_DASHBOARD_COLUMNS,
   adaptiveWindowEnabled: true,
   isEditMode: false,
@@ -1344,6 +1348,75 @@ export const useStore = create<AppState>((set, get) => ({
 
       return { cards: normalizedCards, groups, activeGroup };
     }),
+
+  duplicateCard: (sourceCardId, overrides) => {
+    let result: DuplicateCardResult = { ok: false, error: 'not_found' };
+
+    set((state) => {
+      const source = state.cards.find((card) => card.id === sourceCardId);
+      if (!source) {
+        result = { ok: false, error: 'not_found' };
+        return {};
+      }
+      if (source.status.is_deleted) {
+        result = { ok: false, error: 'deleted' };
+        return {};
+      }
+
+      const title = String(overrides?.title ?? `${source.title}_Copy`).trim();
+      if (!title) {
+        result = { ok: false, error: 'empty_title' };
+        return {};
+      }
+
+      const targetGroup = normalizeGroupName(overrides?.group ?? source.group);
+      if (isAllGroupName(targetGroup) || !orderedGroupNames(state.groups).includes(targetGroup)) {
+        result = { ok: false, error: 'invalid_group' };
+        return {};
+      }
+
+      const newCardId = crypto.randomUUID();
+      const duplicated: Card = ensureCardLayoutScopes({
+        ...source,
+        id: newCardId,
+        business_id: undefined,
+        title,
+        group: targetGroup,
+        layout_positions: undefined,
+        status: {
+          ...source.status,
+          is_deleted: false,
+          deleted_at: null,
+          sort_order: source.status.sort_order,
+        },
+      });
+
+      const allPlacement = findPlacement(state.cards, duplicated.ui_config.size, state.dashboardColumns, 0);
+      const groupPlacement = findPlacement(
+        state.cards,
+        duplicated.ui_config.size,
+        state.dashboardColumns,
+        0,
+        undefined,
+        targetGroup,
+      );
+      const withPlacement = setCardLayoutPosition(
+        setCardLayoutPosition(duplicated, targetGroup, groupPlacement),
+        undefined,
+        allPlacement,
+      );
+
+      const cards = recalcSortOrder([...state.cards, withPlacement]);
+      const groups = normalizeGroupEntities(state.groups, cards, state.sectionMarkers, state.activeGroup);
+      const normalizedCards = normalizeCardBusinessIds(cards, groups);
+      const activeGroup = normalizeActiveGroup(state.activeGroup, groups);
+
+      result = { ok: true, newCardId };
+      return { cards: normalizedCards, groups, activeGroup };
+    });
+
+    return result;
+  },
 
   duplicateCardsToGroup: (sourceGroupRaw, targetGroupRaw, cardIdsRaw) => {
     const sourceGroup = String(sourceGroupRaw ?? '').trim();

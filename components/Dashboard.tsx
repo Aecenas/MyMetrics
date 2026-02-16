@@ -40,6 +40,13 @@ interface SectionDialogState {
   labelAlign: SectionMarker['label_align'];
 }
 
+interface CopyDialogState {
+  sourceCardId: string;
+  titleInput: string;
+  groupInput: string;
+  error: string;
+}
+
 const normalizeSectionColor = (input: string): SectionMarker['line_color'] => {
   const value = input.trim().toLowerCase();
   return SECTION_COLORS.includes(value as SectionMarker['line_color'])
@@ -122,6 +129,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
     removeSectionMarker,
     refreshAllCards,
     refreshCard,
+    duplicateCard,
     language,
     theme,
   } = useStore();
@@ -135,6 +143,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
   const [historyCardId, setHistoryCardId] = useState<string | null>(null);
   const [sectionDialog, setSectionDialog] = useState<SectionDialogState | null>(null);
   const [sectionDialogError, setSectionDialogError] = useState<string>('');
+  const [copyDialog, setCopyDialog] = useState<CopyDialogState | null>(null);
 
   const visibleCards = useMemo(() => cards.filter((card) => !card.status.is_deleted), [cards]);
   const displayedSections = useMemo(
@@ -391,6 +400,64 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
     openSectionCreateDialog();
   };
 
+  const openCopyDialog = (card: Card) => {
+    setCopyDialog({
+      sourceCardId: card.id,
+      titleInput: `${card.title}_Copy`,
+      groupInput: card.group,
+      error: '',
+    });
+  };
+
+  const closeCopyDialog = () => {
+    setCopyDialog(null);
+  };
+
+  const updateCopyDialog = (updates: Partial<CopyDialogState>) => {
+    setCopyDialog((prev) => (prev ? { ...prev, ...updates } : prev));
+  };
+
+  const handleSubmitCopyDialog = () => {
+    if (!copyDialog) return;
+
+    const title = copyDialog.titleInput.trim();
+    if (!title) {
+      updateCopyDialog({ error: tr('dashboard.copyErrorTitleRequired') });
+      return;
+    }
+
+    const targetGroup = copyDialog.groupInput.trim();
+    const groupNames = groups.map((group) => group.name);
+    if (!groupNames.includes(targetGroup)) {
+      updateCopyDialog({ error: tr('dashboard.copyErrorGroupInvalid') });
+      return;
+    }
+
+    const result = duplicateCard(copyDialog.sourceCardId, {
+      title,
+      group: targetGroup,
+    });
+
+    if ('error' in result) {
+      if (result.error === 'not_found') {
+        updateCopyDialog({ error: tr('dashboard.copyErrorSourceMissing') });
+        return;
+      }
+      if (result.error === 'deleted') {
+        updateCopyDialog({ error: tr('dashboard.copyErrorSourceDeleted') });
+        return;
+      }
+      if (result.error === 'invalid_group') {
+        updateCopyDialog({ error: tr('dashboard.copyErrorGroupInvalid') });
+        return;
+      }
+      updateCopyDialog({ error: tr('dashboard.copyErrorTitleRequired') });
+      return;
+    }
+
+    closeCopyDialog();
+  };
+
   const renderCard = (card: Card) => {
     if (card.type === 'scalar') return <ScalarCard card={card} />;
     if (card.type === 'series') return <SeriesCard card={card} />;
@@ -634,6 +701,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
                 onSelect={() => setSelectedCardId(card.id)}
                 onRefresh={() => refreshCard(card.id)}
                 onEdit={() => onEditCard(card.id)}
+                onCopy={() => openCopyDialog(card)}
                 onHistory={() => setHistoryCardId(card.id)}
               >
                 {renderCard(card)}
@@ -642,6 +710,60 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
           </div>
         )}
       </div>
+
+      {copyDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg rounded-xl border border-border bg-card shadow-2xl">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <h3 className="text-base font-semibold text-foreground">{tr('dashboard.copyDialogTitle')}</h3>
+              <Button variant="ghost" size="icon" onClick={closeCopyDialog}>
+                <X size={16} />
+              </Button>
+            </div>
+
+            <div className="space-y-4 px-4 py-4">
+              <div className="space-y-1">
+                <label className="text-sm font-medium">{tr('dashboard.copyNameLabel')}</label>
+                <input
+                  type="text"
+                  value={copyDialog.titleInput}
+                  onChange={(event) => updateCopyDialog({ titleInput: event.target.value, error: '' })}
+                  placeholder={tr('dashboard.copyNamePlaceholder')}
+                  className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium">{tr('dashboard.copyGroupLabel')}</label>
+                <select
+                  value={copyDialog.groupInput}
+                  onChange={(event) => updateCopyDialog({ groupInput: event.target.value, error: '' })}
+                  className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  {groups.map((group) => (
+                    <option key={group.id} value={group.name}>
+                      {group.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {copyDialog.error && (
+                <div className="rounded-md border border-red-500/30 bg-red-500/10 p-2 text-sm text-red-300">
+                  {copyDialog.error}
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-border px-4 py-3 flex items-center justify-end gap-2">
+              <Button variant="ghost" onClick={closeCopyDialog}>
+                {tr('common.cancel')}
+              </Button>
+              <Button onClick={handleSubmitCopyDialog}>{tr('dashboard.copyConfirm')}</Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {sectionDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">

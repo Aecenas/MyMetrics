@@ -196,4 +196,23 @@ describe('group batch actions', () => {
     expect(copied).toHaveLength(1);
     expect(hasGroupCollision(state.cards, 'Ops', state.dashboardColumns)).toBe(false);
   });
+
+  it('duplicates one card with custom title and target group', () => {
+    useStore.setState({
+      cards: [createCard('A', 'Infra', 0, 0)],
+      groups: createGroups('Infra', 'Ops'),
+    });
+
+    const result = useStore.getState().duplicateCard('A', {
+      title: 'A_Copy_Custom',
+      group: 'Ops',
+    });
+
+    expect(result.ok).toBe(true);
+    const state = useStore.getState();
+    const duplicated = state.cards.find((card) => card.title === 'A_Copy_Custom');
+    expect(duplicated).toBeDefined();
+    expect(duplicated?.group).toBe('Ops');
+    expect(duplicated?.business_id?.startsWith('G2-C')).toBe(true);
+  });
 });

@@ -57,7 +57,7 @@ export interface DraftExecutionInput {
 
 const isTauri = () => typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
 const getLanguage = (): AppLanguage =>
-  typeof document !== 'undefined' && document.documentElement.lang === 'zh-CN' ? 'zh-CN' : 'en-US';
+  typeof document !== 'undefined' && document.documentElement.lang === 'en-US' ? 'en-US' : 'zh-CN';
 const tr = (key: string, params?: Record<string, string | number>) => t(getLanguage(), key, params);
 
 const clip = (value: string, max = 300) => {

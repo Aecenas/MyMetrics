@@ -68,10 +68,10 @@ export interface ImportSettingsResult {
 
 const isTauri = () => typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
 const getLanguage = (): AppLanguage =>
-  typeof document !== 'undefined' && document.documentElement.lang === 'zh-CN' ? 'zh-CN' : 'en-US';
+  typeof document !== 'undefined' && document.documentElement.lang === 'en-US' ? 'en-US' : 'zh-CN';
 const tr = (key: string, params?: Record<string, string | number>) => t(getLanguage(), key, params);
 
-const normalizeLanguage = (value: unknown): AppLanguage => (value === 'zh-CN' ? 'zh-CN' : 'en-US');
+const normalizeLanguage = (value: unknown): AppLanguage => (value === 'en-US' ? 'en-US' : 'zh-CN');
 const normalizeAdaptiveWindowEnabled = (value: unknown): boolean => value !== false;
 const isAllGroupName = (name: string): boolean => name.trim().toLowerCase() === RESERVED_ALL_GROUP.toLowerCase();
 const normalizeGroupName = (value: unknown): string => {
@@ -657,7 +657,7 @@ const migrateToLatest = (input: any): AppSettings => {
 
   return {
     schema_version: SCHEMA_VERSION,
-    theme: input?.theme === 'light' ? 'light' : 'dark',
+    theme: input?.theme === 'dark' ? 'dark' : 'light',
     language: normalizeLanguage(input?.language),
     dashboard_columns,
     adaptive_window_enabled: normalizeAdaptiveWindowEnabled(input?.adaptive_window_enabled),
@@ -727,7 +727,7 @@ const sanitizeForSave = (settings: AppSettings): AppSettings => {
 
   return {
     schema_version: SCHEMA_VERSION,
-    theme: settings.theme === 'light' ? 'light' : 'dark',
+    theme: settings.theme === 'dark' ? 'dark' : 'light',
     language: normalizeLanguage((settings as Partial<AppSettings>).language),
     dashboard_columns,
     adaptive_window_enabled: normalizeAdaptiveWindowEnabled((settings as Partial<AppSettings>).adaptive_window_enabled),

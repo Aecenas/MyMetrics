@@ -20,6 +20,7 @@ export const SeriesCard: React.FC<SeriesCardProps> = ({ card }) => {
   const language = useStore((state) => state.language);
   const tr = (key: string) => t(language, key);
   const payload = card.runtimeData?.payload as ScriptOutputSeries | undefined;
+  const isCompactCard = card.ui_config.size === '1x1';
 
   if (!payload || !payload.series || payload.series.length === 0) {
     return <div className="text-sm text-muted-foreground">{tr('common.noData')}</div>;
@@ -34,6 +35,7 @@ export const SeriesCard: React.FC<SeriesCardProps> = ({ card }) => {
   });
 
   const primarySeries = payload.series[0]?.name;
+  const chartMargin = isCompactCard ? { top: 4, right: 4, left: 4, bottom: 0 } : { top: 10, right: 0, left: -20, bottom: 0 };
 
   const getStroke = () => {
     switch (card.ui_config.color_theme) {
@@ -53,26 +55,29 @@ export const SeriesCard: React.FC<SeriesCardProps> = ({ card }) => {
   };
 
   return (
-    <div className="w-full h-full min-h-[140px]">
+    <div className="w-full h-full min-h-0">
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={chartData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
+        <AreaChart data={chartData} margin={chartMargin}>
           <defs>
             <linearGradient id={`color-${card.id}`} x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor={getStroke()} stopOpacity={0.3} />
               <stop offset="95%" stopColor={getStroke()} stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} opacity={isCompactCard ? 0.35 : 1} />
           <XAxis
             dataKey="name"
             tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
             tickLine={false}
             axisLine={false}
+            hide={isCompactCard}
           />
           <YAxis
             tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
             tickLine={false}
             axisLine={false}
+            hide={isCompactCard}
+            width={isCompactCard ? 0 : 28}
           />
           <Tooltip
             contentStyle={{
@@ -93,6 +98,7 @@ export const SeriesCard: React.FC<SeriesCardProps> = ({ card }) => {
               fillOpacity={1}
               fill={`url(#color-${card.id})`}
               strokeWidth={2}
+              isAnimationActive={!isCompactCard}
             />
           )}
         </AreaChart>

@@ -62,7 +62,7 @@ describe('storage migration', () => {
     const migrated = storageMigration.migrateToLatest(legacy);
 
     expect(migrated.schema_version).toBe(5);
-    expect(migrated.language).toBe('en-US');
+    expect(migrated.language).toBe('zh-CN');
     expect(migrated.dashboard_columns).toBe(4);
     expect(migrated.adaptive_window_enabled).toBe(true);
     expect(migrated.refresh_concurrency_limit).toBe(4);
@@ -254,19 +254,19 @@ describe('storage migration', () => {
 describe('import validation', () => {
   it('rejects non-object JSON payload', () => {
     expect(() => storageMigration.validateImportStructure([])).toThrowError(
-      'Import failed: root JSON must be an object.',
+      '导入失败：JSON 根节点必须是对象。',
     );
   });
 
   it('rejects invalid cards field type', () => {
     expect(() => storageMigration.validateImportStructure({ cards: 'bad' })).toThrowError(
-      'Import failed: field "cards" must be an array.',
+      '导入失败：字段“cards”必须是数组。',
     );
   });
 
   it('rejects invalid schema version', () => {
     expect(() => storageMigration.validateImportStructure({ schema_version: -1 })).toThrowError(
-      'Import failed: schema_version must be a positive integer.',
+      '导入失败：schema_version 必须是正整数。',
     );
   });
 });

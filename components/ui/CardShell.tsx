@@ -1,10 +1,12 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { AppLanguage, Card as CardType } from '../../types';
 import {
   MoreVertical,
   RefreshCw,
   Trash2,
   Settings,
+  Copy,
   AlertCircle,
   Clock3,
   CircleAlert,
@@ -25,6 +27,7 @@ interface CardShellProps {
   onRefresh?: () => void;
   onEdit?: () => void;
   onHistory?: () => void;
+  onCopy?: () => void;
 }
 
 const formatTime = (value: number | undefined, language: AppLanguage, neverText: string) => {
@@ -42,13 +45,17 @@ export const CardShell: React.FC<CardShellProps> = ({
   onRefresh,
   onEdit,
   onHistory,
+  onCopy,
 }) => {
   const { softDeleteCard, language, theme } = useStore();
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const [menuPosition, setMenuPosition] = React.useState({ top: 0, left: 0 });
+  const menuTriggerRef = React.useRef<HTMLButtonElement | null>(null);
   const cardRef = React.useRef<HTMLDivElement | null>(null);
   const previousRectRef = React.useRef<DOMRect | null>(null);
   const moveAnimationRef = React.useRef<Animation | null>(null);
   const failedMoveAnimationRef = React.useRef<Animation | null>(null);
+  const thresholdPulseTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const tr = (key: string, params?: Record<string, string | number>) => t(language, key, params);
 
   const width = card.ui_config.size.startsWith('2') ? 2 : 1;
@@ -74,12 +81,61 @@ export const CardShell: React.FC<CardShellProps> = ({
   const isLoading = card.runtimeData?.isLoading;
   const isError = card.runtimeData?.state === 'error';
   const thresholdAlertTriggered = Boolean(card.runtimeData?.thresholdAlertTriggered);
+  const [thresholdPulseActive, setThresholdPulseActive] = React.useState(false);
+  const previousThresholdAlertRef = React.useRef(thresholdAlertTriggered);
+  const thresholdAlertBackgroundClass =
+    thresholdAlertTriggered && !(isEditMode && isSelected) ? 'bg-destructive/[0.06]' : '';
+  const thresholdAlertBorderClass = thresholdAlertTriggered
+    ? 'border-destructive/60 shadow-[0_0_0_1px_hsl(var(--destructive)/0.24)]'
+    : '';
   const selectedInvertedClass =
     isEditMode && isSelected
       ? theme === 'dark'
         ? 'bg-white text-slate-900 border-slate-200'
         : 'bg-slate-100 text-slate-900 border-slate-300'
       : '';
+
+  React.useEffect(() => {
+    const previouslyTriggered = previousThresholdAlertRef.current;
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (thresholdAlertTriggered && !previouslyTriggered && !reduceMotion) {
+      setThresholdPulseActive(true);
+      if (thresholdPulseTimeoutRef.current) {
+        clearTimeout(thresholdPulseTimeoutRef.current);
+      }
+      thresholdPulseTimeoutRef.current = setTimeout(() => {
+        setThresholdPulseActive(false);
+        thresholdPulseTimeoutRef.current = null;
+      }, 1800);
+    }
+
+    if (!thresholdAlertTriggered) {
+      setThresholdPulseActive(false);
+      if (thresholdPulseTimeoutRef.current) {
+        clearTimeout(thresholdPulseTimeoutRef.current);
+        thresholdPulseTimeoutRef.current = null;
+      }
+    }
+
+    previousThresholdAlertRef.current = thresholdAlertTriggered;
+  }, [thresholdAlertTriggered]);
+
+  const updateMenuPosition = React.useCallback(() => {
+    const trigger = menuTriggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const viewportPadding = 8;
+    const menuWidth = 176;
+    const estimatedMenuHeight = 232;
+    let left = rect.right - menuWidth;
+    left = Math.min(Math.max(left, viewportPadding), window.innerWidth - menuWidth - viewportPadding);
+    let top = rect.bottom + 6;
+    if (top + estimatedMenuHeight > window.innerHeight - viewportPadding) {
+      top = Math.max(viewportPadding, rect.top - estimatedMenuHeight - 6);
+    }
+    setMenuPosition({ top, left });
+  }, []);
 
   React.useLayoutEffect(() => {
     const node = cardRef.current;
@@ -121,6 +177,9 @@ export const CardShell: React.FC<CardShellProps> = ({
     () => () => {
       moveAnimationRef.current?.cancel();
       failedMoveAnimationRef.current?.cancel();
+      if (thresholdPulseTimeoutRef.current) {
+        clearTimeout(thresholdPulseTimeoutRef.current);
+      }
     },
     [],
   );
@@ -149,6 +208,25 @@ export const CardShell: React.FC<CardShellProps> = ({
       },
     );
   }, [failedMoveSignal, isEditMode, isSelected]);
+
+  React.useEffect(() => {
+    if (!menuOpen) return;
+    updateMenuPosition();
+    const handleScrollOrResize = () => updateMenuPosition();
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setMenuOpen(false);
+      }
+    };
+    window.addEventListener('resize', handleScrollOrResize);
+    window.addEventListener('scroll', handleScrollOrResize, true);
+    window.addEventListener('keydown', handleEscape);
+    return () => {
+      window.removeEventListener('resize', handleScrollOrResize);
+      window.removeEventListener('scroll', handleScrollOrResize, true);
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [menuOpen, updateMenuPosition]);
 
   return (
     <div
@@ -179,90 +257,63 @@ export const CardShell: React.FC<CardShellProps> = ({
         ${isEditMode ? 'cursor-pointer z-20 outline-none' : 'z-10'}
         ${isEditMode ? 'hover:shadow-md' : ''}
         ${selectedInvertedClass}
+        ${thresholdAlertBackgroundClass}
+        ${thresholdAlertBorderClass}
         h-full
       `}
     >
+      {thresholdAlertTriggered && (
+        <div
+          aria-hidden
+          className={`pointer-events-none absolute inset-0 rounded-lg ring-1 ring-destructive/40 ${
+            thresholdPulseActive ? 'card-threshold-alert-pulse' : ''
+          }`}
+        />
+      )}
+      {thresholdAlertTriggered && <div aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-destructive/80" />}
       <div className="flex items-center justify-between p-4 pb-2 select-none gap-2">
         <div className="min-w-0 flex items-center gap-1.5">
           {thresholdAlertTriggered && (
             <AlertTriangle
               size={14}
-              className="text-amber-500 shrink-0"
+              className="text-destructive shrink-0"
               title={tr('cardShell.thresholdAlertTriggered')}
             />
           )}
           <div className="min-w-0">
-            <h3 className="font-semibold tracking-tight truncate text-sm text-muted-foreground uppercase">
+            <h3 className="font-semibold tracking-tight truncate text-sm text-muted-foreground uppercase min-w-0">
               {card.title}
             </h3>
-            <p className="text-[11px] text-muted-foreground/80 truncate">
-              {tr('cardShell.idWithValue', { id: card.business_id ?? '-' })}
-            </p>
+            <div className="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-muted-foreground/80">
+              <span className="max-w-full truncate">{tr('cardShell.idWithValue', { id: card.business_id ?? '-' })}</span>
+            </div>
           </div>
         </div>
 
         {!isEditMode && (
-          <div className="relative shrink-0">
+          <div className="shrink-0">
             <Button
               variant="ghost"
               size="icon"
               className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
               onClick={(event) => {
                 event.stopPropagation();
+                menuTriggerRef.current = event.currentTarget;
+                if (!menuOpen) {
+                  updateMenuPosition();
+                }
                 setMenuOpen(!menuOpen);
               }}
             >
               <MoreVertical size={14} />
             </Button>
-
-            {menuOpen && (
-              <div
-                className="absolute right-0 top-6 z-50 w-40 rounded-md border border-border bg-popover p-1 shadow-md animate-in fade-in zoom-in-95 duration-100 cursor-default"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <button
-                  className="flex w-full items-center rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground"
-                  onClick={() => {
-                    onRefresh?.();
-                    setMenuOpen(false);
-                  }}
-                >
-                  <RefreshCw size={12} className="mr-2" /> {tr('cardShell.refresh')}
-                </button>
-                <button
-                  className="flex w-full items-center rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground"
-                  onClick={() => {
-                    onEdit?.();
-                    setMenuOpen(false);
-                  }}
-                >
-                  <Settings size={12} className="mr-2" /> {tr('cardShell.edit')}
-                </button>
-                <button
-                  className="flex w-full items-center rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground"
-                  onClick={() => {
-                    onHistory?.();
-                    setMenuOpen(false);
-                  }}
-                >
-                  <History size={12} className="mr-2" /> {tr('cardShell.history')}
-                </button>
-                <button
-                  onClick={() => {
-                    softDeleteCard(card.id);
-                    setMenuOpen(false);
-                  }}
-                  className="flex w-full items-center rounded-sm px-2 py-1.5 text-xs text-red-500 hover:bg-red-950/20"
-                >
-                  <Trash2 size={12} className="mr-2" /> {tr('cardShell.delete')}
-                </button>
-              </div>
-            )}
           </div>
         )}
       </div>
 
-      <div className="flex-1 p-4 pt-0 min-h-[100px] flex flex-col justify-center pointer-events-none">
+      <div
+        className="flex-1 min-h-0 p-4 pt-0 flex flex-col justify-center pointer-events-none"
+      >
         {isLoading ? (
           <div className="animate-pulse space-y-2">
             <div className="h-4 w-1/2 bg-muted rounded" />
@@ -289,27 +340,86 @@ export const CardShell: React.FC<CardShellProps> = ({
       </div>
 
       {!isEditMode && (
-        <div className="px-4 pb-3 flex items-center justify-between text-[11px] text-muted-foreground/90">
-        <div className="inline-flex items-center gap-1">
-          {isLoading ? <RefreshCw size={12} className="animate-spin" /> : <Clock3 size={12} />}
-          <span>
-            {isLoading
-              ? tr('cardShell.refreshing')
-              : formatTime(card.runtimeData?.lastUpdated, language, tr('cardShell.never'))}
-          </span>
-        </div>
-          {card.runtimeData?.state === 'error' && <AlertCircle size={12} className="text-destructive" />}
+        <div className="h-8 shrink-0 px-4 flex items-center justify-between text-[11px] text-muted-foreground/90">
+          <div className="inline-flex min-w-0 items-center gap-1">
+            {isLoading ? <RefreshCw size={12} className="animate-spin shrink-0" /> : <Clock3 size={12} className="shrink-0" />}
+            <span className="truncate">
+              {isLoading
+                ? tr('cardShell.refreshing')
+                : formatTime(card.runtimeData?.lastUpdated, language, tr('cardShell.never'))}
+            </span>
+          </div>
+          {card.runtimeData?.state === 'error' && <AlertCircle size={12} className="text-destructive shrink-0" />}
         </div>
       )}
 
       {menuOpen && (
-        <div
-          className="fixed inset-0 z-40 cursor-default"
-          onClick={(event) => {
-            event.stopPropagation();
-            setMenuOpen(false);
-          }}
-        />
+        <>
+          {createPortal(
+            <div
+              className="fixed inset-0 z-40 cursor-default"
+              onClick={(event) => {
+                event.stopPropagation();
+                setMenuOpen(false);
+              }}
+            />,
+            document.body,
+          )}
+          {createPortal(
+            <div
+              className="fixed z-50 w-44 rounded-md border border-border bg-popover p-1 shadow-md animate-in fade-in zoom-in-95 duration-100 cursor-default max-h-[min(65vh,18rem)] overflow-y-auto"
+              style={{ top: `${menuPosition.top}px`, left: `${menuPosition.left}px` }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <button
+                className="flex w-full items-center rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground"
+                onClick={() => {
+                  onRefresh?.();
+                  setMenuOpen(false);
+                }}
+              >
+                <RefreshCw size={12} className="mr-2" /> {tr('cardShell.refresh')}
+              </button>
+              <button
+                className="flex w-full items-center rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground"
+                onClick={() => {
+                  onEdit?.();
+                  setMenuOpen(false);
+                }}
+              >
+                <Settings size={12} className="mr-2" /> {tr('cardShell.edit')}
+              </button>
+              <button
+                className="flex w-full items-center rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground"
+                onClick={() => {
+                  onCopy?.();
+                  setMenuOpen(false);
+                }}
+              >
+                <Copy size={12} className="mr-2" /> {tr('cardShell.copy')}
+              </button>
+              <button
+                className="flex w-full items-center rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground"
+                onClick={() => {
+                  onHistory?.();
+                  setMenuOpen(false);
+                }}
+              >
+                <History size={12} className="mr-2" /> {tr('cardShell.history')}
+              </button>
+              <button
+                onClick={() => {
+                  softDeleteCard(card.id);
+                  setMenuOpen(false);
+                }}
+                className="flex w-full items-center rounded-sm px-2 py-1.5 text-xs text-red-500 hover:bg-red-950/20"
+              >
+                <Trash2 size={12} className="mr-2" /> {tr('cardShell.delete')}
+              </button>
+            </div>,
+            document.body,
+          )}
+        </>
       )}
     </div>
   );

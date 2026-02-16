@@ -36,14 +36,14 @@ export const ScalarCard: React.FC<ScalarCardProps> = ({ card }) => {
   };
 
   return (
-    <div className="flex items-end justify-between h-full pb-2">
+    <div className="flex h-full items-center justify-between">
       <div className="flex flex-col overflow-hidden">
         <div className={`text-4xl font-bold tracking-tight ${getColor(data.color)}`}>
           {data.value}
           {data.unit && <span className="text-lg font-medium text-muted-foreground ml-1">{data.unit}</span>}
         </div>
       </div>
-      <div className="mb-2">
+      <div>
         <TrendIcon />
       </div>
     </div>
