@@ -49,7 +49,7 @@ export const CardShell: React.FC<CardShellProps> = ({
   const previousRectRef = React.useRef<DOMRect | null>(null);
   const moveAnimationRef = React.useRef<Animation | null>(null);
   const failedMoveAnimationRef = React.useRef<Animation | null>(null);
-  const tr = (key: string) => t(language, key);
+  const tr = (key: string, params?: Record<string, string | number>) => t(language, key, params);
 
   const width = card.ui_config.size.startsWith('2') ? 2 : 1;
   const height = card.ui_config.size.endsWith('2') ? 2 : 1;
@@ -191,9 +191,14 @@ export const CardShell: React.FC<CardShellProps> = ({
               title={tr('cardShell.thresholdAlertTriggered')}
             />
           )}
-          <h3 className="font-semibold tracking-tight truncate text-sm text-muted-foreground uppercase">
-            {card.title}
-          </h3>
+          <div className="min-w-0">
+            <h3 className="font-semibold tracking-tight truncate text-sm text-muted-foreground uppercase">
+              {card.title}
+            </h3>
+            <p className="text-[11px] text-muted-foreground/80 truncate">
+              {tr('cardShell.idWithValue', { id: card.business_id ?? '-' })}
+            </p>
+          </div>
         </div>
 
         {!isEditMode && (

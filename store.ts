@@ -50,6 +50,8 @@ const LEGACY_SAMPLE_IDS = new Set(['1', '2', '3', '4']);
 const LEGACY_SAMPLE_TITLES = new Set(['Server CPU', 'RAM Usage', 'Traffic Trend', 'Weather Status']);
 const RESERVED_ALL_GROUP = 'All';
 const DEFAULT_GROUP_NAME = 'Default';
+const GROUP_ID_PATTERN = /^G(\d+)$/i;
+const CARD_BUSINESS_ID_PATTERN = /^G(\d+)-C(\d+)$/i;
 
 type GroupMutationError =
   | 'empty'
@@ -175,21 +177,83 @@ const uniqueIds = (ids: string[]): string[] => {
   return result;
 };
 
+const normalizeGroupId = (value: unknown): string | undefined => {
+  const raw = String(value ?? '').trim().toUpperCase();
+  const matched = GROUP_ID_PATTERN.exec(raw);
+  if (!matched) return undefined;
+  const number = Number.parseInt(matched[1], 10);
+  if (!Number.isInteger(number) || number <= 0) return undefined;
+  return `G${number}`;
+};
+
+const getGroupIdNumber = (groupId: string): number => {
+  const matched = GROUP_ID_PATTERN.exec(groupId);
+  if (!matched) return 0;
+  const number = Number.parseInt(matched[1], 10);
+  return Number.isInteger(number) && number > 0 ? number : 0;
+};
+
+const formatGroupId = (number: number): string => `G${Math.max(1, Math.floor(number))}`;
+
+const parseBusinessId = (value: unknown): { groupId: string; cardNumber: number } | null => {
+  const raw = String(value ?? '').trim().toUpperCase();
+  const matched = CARD_BUSINESS_ID_PATTERN.exec(raw);
+  if (!matched) return null;
+  const groupNumber = Number.parseInt(matched[1], 10);
+  const cardNumber = Number.parseInt(matched[2], 10);
+  if (!Number.isInteger(groupNumber) || groupNumber <= 0 || !Number.isInteger(cardNumber) || cardNumber <= 0) {
+    return null;
+  }
+  return {
+    groupId: formatGroupId(groupNumber),
+    cardNumber,
+  };
+};
+
 const normalizeGroupEntities = (
   groupsInput: GroupEntity[] | undefined,
   cards: Card[],
   sectionMarkers: SectionMarker[],
   activeGroup?: string,
 ): GroupEntity[] => {
-  const orderedNames: string[] = [];
-  const seen = new Set<string>();
+  const ordered: Array<{ name: string; id?: string }> = [];
+  const seenNames = new Set<string>();
+  const seenIds = new Set<string>();
+  let maxIdNumber = 0;
 
-  const pushName = (rawName: unknown) => {
+  (groupsInput ?? []).forEach((group) => {
+    const normalizedId = normalizeGroupId(group.id);
+    if (!normalizedId) return;
+    maxIdNumber = Math.max(maxIdNumber, getGroupIdNumber(normalizedId));
+  });
+
+  const createGroupId = () => {
+    let candidate = maxIdNumber + 1;
+    while (seenIds.has(formatGroupId(candidate))) {
+      candidate += 1;
+    }
+    maxIdNumber = candidate;
+    const id = formatGroupId(candidate);
+    seenIds.add(id);
+    return id;
+  };
+
+  const pushGroup = (rawName: unknown, preferredId?: unknown) => {
     const name = normalizeGroupName(rawName);
     if (isAllGroupName(name)) return;
-    if (seen.has(name)) return;
-    seen.add(name);
-    orderedNames.push(name);
+    if (seenNames.has(name)) return;
+    seenNames.add(name);
+
+    const normalizedPreferredId = normalizeGroupId(preferredId);
+    let id: string | undefined = normalizedPreferredId;
+    if (!id || seenIds.has(id)) {
+      id = createGroupId();
+    } else {
+      seenIds.add(id);
+      maxIdNumber = Math.max(maxIdNumber, getGroupIdNumber(id));
+    }
+
+    ordered.push({ name, id });
   };
 
   (groupsInput ?? [])
@@ -198,30 +262,45 @@ const normalizeGroupEntities = (
       if (a.order !== b.order) return a.order - b.order;
       return a.name.localeCompare(b.name);
     })
-    .forEach((group) => pushName(group.name));
+    .forEach((group) => pushGroup(group.name, group.id));
 
-  cards.forEach((card) => pushName(card.group));
-  sectionMarkers.forEach((section) => pushName(section.group));
+  cards.forEach((card) => pushGroup(card.group));
+  sectionMarkers.forEach((section) => pushGroup(section.group));
 
   if (activeGroup && !isAllGroupName(activeGroup)) {
-    pushName(activeGroup);
+    pushGroup(activeGroup);
   }
 
-  if (orderedNames.length === 0) {
-    orderedNames.push(DEFAULT_GROUP_NAME);
+  if (ordered.length === 0) {
+    pushGroup(DEFAULT_GROUP_NAME);
   }
 
-  return orderedNames.map((name, order) => ({ name, order }));
+  return ordered.map((group, order) => ({
+    id: group.id ?? createGroupId(),
+    name: group.name,
+    order,
+  }));
 };
 
-const orderedGroupNames = (groups: GroupEntity[]): string[] =>
+const sortGroups = (groups: GroupEntity[]): GroupEntity[] =>
   groups
     .slice()
     .sort((a, b) => {
       if (a.order !== b.order) return a.order - b.order;
-      return a.name.localeCompare(b.name);
-    })
-    .map((group) => group.name);
+      if (a.name !== b.name) return a.name.localeCompare(b.name);
+      return getGroupIdNumber(a.id) - getGroupIdNumber(b.id);
+    });
+
+const orderedGroupNames = (groups: GroupEntity[]): string[] =>
+  sortGroups(groups).map((group) => group.name);
+
+const groupIdByName = (groups: GroupEntity[]): Map<string, string> =>
+  new Map(sortGroups(groups).map((group) => [group.name, group.id]));
+
+const nextGroupIdFromGroups = (groups: GroupEntity[]): string => {
+  const max = groups.reduce((acc, group) => Math.max(acc, getGroupIdNumber(group.id)), 0);
+  return formatGroupId(max + 1);
+};
 
 const normalizeActiveGroup = (activeGroup: string, groups: GroupEntity[]): string => {
   if (isAllGroupName(activeGroup)) return RESERVED_ALL_GROUP;
@@ -235,6 +314,49 @@ const normalizeCardGroup = (card: Card): Card => {
     ...card,
     group: normalized,
   };
+};
+
+const normalizeCardBusinessIds = (cards: Card[], groups: GroupEntity[]): Card[] => {
+  const groupIdMap = groupIdByName(groups);
+  const usedBusinessIds = new Set<string>();
+  const maxCardNumberByGroupId = new Map<string, number>();
+  const validBusinessIdByCardId = new Map<string, string>();
+
+  cards.forEach((card) => {
+    const groupId = groupIdMap.get(card.group);
+    if (!groupId) return;
+    const parsed = parseBusinessId(card.business_id);
+    if (!parsed) return;
+    if (parsed.groupId !== groupId) return;
+    const normalizedBusinessId = `${parsed.groupId}-C${parsed.cardNumber}`;
+    if (usedBusinessIds.has(normalizedBusinessId)) return;
+    usedBusinessIds.add(normalizedBusinessId);
+    validBusinessIdByCardId.set(card.id, normalizedBusinessId);
+    maxCardNumberByGroupId.set(groupId, Math.max(maxCardNumberByGroupId.get(groupId) ?? 0, parsed.cardNumber));
+  });
+
+  const nextBusinessId = (groupId: string) => {
+    let candidate = (maxCardNumberByGroupId.get(groupId) ?? 0) + 1;
+    let businessId = `${groupId}-C${candidate}`;
+    while (usedBusinessIds.has(businessId)) {
+      candidate += 1;
+      businessId = `${groupId}-C${candidate}`;
+    }
+    usedBusinessIds.add(businessId);
+    maxCardNumberByGroupId.set(groupId, candidate);
+    return businessId;
+  };
+
+  return cards.map((card) => {
+    const groupId = groupIdMap.get(card.group);
+    if (!groupId) return card;
+    const businessId = validBusinessIdByCardId.get(card.id) ?? nextBusinessId(groupId);
+    if (card.business_id === businessId) return card;
+    return {
+      ...card,
+      business_id: businessId,
+    };
+  });
 };
 
 const normalizeSectionMarker = (marker: SectionMarker, columns: number): SectionMarker => {
@@ -714,12 +836,13 @@ const normalizeSettingsForStore = (settings: AppSettings): NormalizedSettingsFor
     normalizeSectionMarker(section, dashboardColumns),
   );
   const groups = normalizeGroupEntities(settings.groups, cards, sectionMarkers, settings.activeGroup);
+  const cardsWithBusinessIds = normalizeCardBusinessIds(cards, groups);
   const normalizedSections = sortSectionMarkers(sectionMarkers, groups);
   const activeGroup = normalizeActiveGroup(settings.activeGroup, groups);
 
   return {
     dashboardColumns,
-    cards,
+    cards: cardsWithBusinessIds,
     sectionMarkers: normalizedSections,
     groups,
     activeGroup,
@@ -852,7 +975,7 @@ export const useStore = create<AppState>((set, get) => ({
   isInitialized: false,
   cards: [],
   sectionMarkers: [],
-  groups: [{ name: DEFAULT_GROUP_NAME, order: 0 }],
+  groups: [{ id: 'G1', name: DEFAULT_GROUP_NAME, order: 0 }],
   dataPath: '',
   backupDirectory: DEFAULT_BACKUP_CONFIG.directory,
   backupRetentionCount: DEFAULT_BACKUP_CONFIG.retention_count,
@@ -1216,9 +1339,10 @@ export const useStore = create<AppState>((set, get) => ({
       );
       const cards = recalcSortOrder([...state.cards, withPlacement]);
       const groups = normalizeGroupEntities(state.groups, cards, state.sectionMarkers, state.activeGroup);
+      const normalizedCards = normalizeCardBusinessIds(cards, groups);
       const activeGroup = normalizeActiveGroup(state.activeGroup, groups);
 
-      return { cards, groups, activeGroup };
+      return { cards: normalizedCards, groups, activeGroup };
     }),
 
   duplicateCardsToGroup: (sourceGroupRaw, targetGroupRaw, cardIdsRaw) => {
@@ -1308,9 +1432,10 @@ export const useStore = create<AppState>((set, get) => ({
 
       cards = recalcSortOrder(cards);
       const groups = normalizeGroupEntities(state.groups, cards, state.sectionMarkers, state.activeGroup);
+      const normalizedCards = normalizeCardBusinessIds(cards, groups);
       const activeGroup = normalizeActiveGroup(state.activeGroup, groups);
 
-      return { cards, groups, activeGroup };
+      return { cards: normalizedCards, groups, activeGroup };
     });
 
     return report;
@@ -1398,7 +1523,7 @@ export const useStore = create<AppState>((set, get) => ({
           };
         });
 
-        return { cards };
+        return { cards: normalizeCardBusinessIds(cards, state.groups) };
       }
 
       if (request.type === 'soft_delete') {
@@ -1424,10 +1549,11 @@ export const useStore = create<AppState>((set, get) => ({
         });
 
         const groups = normalizeGroupEntities(state.groups, cards, sectionMarkers, state.activeGroup);
+        const normalizedCards = normalizeCardBusinessIds(cards, groups);
         const activeGroup = normalizeActiveGroup(state.activeGroup, groups);
 
         return {
-          cards,
+          cards: normalizedCards,
           groups,
           activeGroup,
           sectionMarkers: sortSectionMarkers(sectionMarkers, groups),
@@ -1473,10 +1599,11 @@ export const useStore = create<AppState>((set, get) => ({
         };
       });
       const groups = normalizeGroupEntities(state.groups, cards, sectionMarkers, state.activeGroup);
+      const normalizedCards = normalizeCardBusinessIds(cards, groups);
       const activeGroup = normalizeActiveGroup(state.activeGroup, groups);
 
       return {
-        cards,
+        cards: normalizedCards,
         groups,
         activeGroup,
         sectionMarkers: sortSectionMarkers(sectionMarkers, groups),
@@ -1505,7 +1632,7 @@ export const useStore = create<AppState>((set, get) => ({
       }
 
       const groups = normalizeGroupEntities(
-        [...state.groups, { name, order: state.groups.length }],
+        [...state.groups, { id: nextGroupIdFromGroups(state.groups), name, order: state.groups.length }],
         state.cards,
         state.sectionMarkers,
         state.activeGroup,
@@ -1601,7 +1728,12 @@ export const useStore = create<AppState>((set, get) => ({
         return {};
       }
 
-      const groups = nextNames.map((name, order) => ({ name, order }));
+      const idByName = new Map(state.groups.map((group) => [group.name, group.id]));
+      const groups = nextNames.map((name, order) => ({
+        id: idByName.get(name) ?? formatGroupId(order + 1),
+        name,
+        order,
+      }));
       return {
         groups,
         sectionMarkers: sortSectionMarkers(state.sectionMarkers, groups),
@@ -1672,15 +1804,23 @@ export const useStore = create<AppState>((set, get) => ({
 
       const groups = groupNames
         .filter((groupName) => groupName !== name)
-        .map((groupName, order) => ({ name: groupName, order }));
+        .map((groupName, order) => {
+          const matched = state.groups.find((group) => group.name === groupName);
+          return {
+            id: matched?.id ?? formatGroupId(order + 1),
+            name: groupName,
+            order,
+          };
+        });
 
       const activeGroup = state.activeGroup === name
         ? (target || RESERVED_ALL_GROUP)
         : normalizeActiveGroup(state.activeGroup, groups);
+      const normalizedCards = normalizeCardBusinessIds(cards, groups);
 
       result = { ok: true };
       return {
-        cards,
+        cards: normalizedCards,
         groups,
         activeGroup,
         sectionMarkers: sortSectionMarkers(nextSectionMarkers, groups),
@@ -1758,9 +1898,10 @@ export const useStore = create<AppState>((set, get) => ({
       });
       const cards = recalcSortOrder(updatedCards);
       const groups = normalizeGroupEntities(state.groups, cards, state.sectionMarkers, state.activeGroup);
+      const normalizedCards = normalizeCardBusinessIds(cards, groups);
       const activeGroup = normalizeActiveGroup(state.activeGroup, groups);
 
-      return { cards, groups, activeGroup };
+      return { cards: normalizedCards, groups, activeGroup };
     }),
 
   moveCard: (id, x, y, scopeGroup) => {

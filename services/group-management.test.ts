@@ -44,7 +44,8 @@ const createSection = (id: string, group: string): SectionMarker => ({
   label_align: 'center',
 });
 
-const createGroups = (...names: string[]): GroupEntity[] => names.map((name, order) => ({ name, order }));
+const createGroups = (...names: string[]): GroupEntity[] =>
+  names.map((name, order) => ({ id: `G${order + 1}`, name, order }));
 
 describe('group management store behavior', () => {
   beforeEach(() => {
@@ -113,9 +114,9 @@ describe('group management store behavior', () => {
     useStore.getState().reorderGroups(['DB', 'Infra', 'Ops']);
 
     expect(useStore.getState().groups).toEqual([
-      { name: 'DB', order: 0 },
-      { name: 'Infra', order: 1 },
-      { name: 'Ops', order: 2 },
+      { id: 'G3', name: 'DB', order: 0 },
+      { id: 'G1', name: 'Infra', order: 1 },
+      { id: 'G2', name: 'Ops', order: 2 },
     ]);
   });
 });

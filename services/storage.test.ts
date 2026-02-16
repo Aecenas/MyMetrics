@@ -69,7 +69,7 @@ describe('storage migration', () => {
     expect(migrated.execution_history_limit).toBe(120);
     expect(migrated.activeGroup).toBe('All');
     expect(migrated.groups).toEqual([
-      { name: 'Infra', order: 0 },
+      { id: 'G1', name: 'Infra', order: 0 },
     ]);
     expect(migrated.cards).toHaveLength(1);
     expect(migrated.section_markers).toEqual([
@@ -174,9 +174,9 @@ describe('storage migration', () => {
     });
 
     expect(migrated.groups).toEqual([
-      { name: 'Infra', order: 0 },
-      { name: 'Ops', order: 1 },
-      { name: 'Queue', order: 2 },
+      { id: 'G1', name: 'Infra', order: 0 },
+      { id: 'G2', name: 'Ops', order: 1 },
+      { id: 'G3', name: 'Queue', order: 2 },
     ]);
     expect(migrated.activeGroup).toBe('Ops');
   });

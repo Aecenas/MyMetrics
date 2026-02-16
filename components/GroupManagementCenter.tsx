@@ -103,6 +103,7 @@ export const GroupManagementCenter: React.FC = () => {
         .map((group) => group.name),
     [groups],
   );
+  const groupMetaByName = useMemo(() => new Map(groups.map((group) => [group.name, group])), [groups]);
 
   const cardCountByGroup = useMemo(() => {
     const map = new Map<string, number>();
@@ -427,6 +428,9 @@ export const GroupManagementCenter: React.FC = () => {
                           ) : (
                             <div className="min-w-0">
                               <div className="font-medium truncate">{name}</div>
+                              <div className="text-[11px] text-muted-foreground/90 mt-0.5">
+                                {tr('groups.groupId', { id: groupMetaByName.get(name)?.id ?? '-' })}
+                              </div>
                               <div className="text-xs text-muted-foreground mt-1">
                                 {tr('groups.summary', { cards: cardCount, sections: markerCount })}
                               </div>
@@ -539,7 +543,12 @@ export const GroupManagementCenter: React.FC = () => {
                             checked={selectedCardIds.includes(card.id)}
                             onChange={() => toggleSelection(selectedCardIds, setSelectedCardIds, card.id)}
                           />
-                          <span className="truncate">{card.title}</span>
+                          <span className="truncate">
+                            {card.title}
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              [{card.type}] {tr('groups.cardId', { id: card.business_id ?? '-' })}
+                            </span>
+                          </span>
                         </label>
                       ))
                     )}

@@ -3,7 +3,8 @@ import { Card, GroupEntity, SectionMarker } from '../types';
 import { useStore } from '../store';
 import { getCardLayoutPosition } from '../layout';
 
-const createGroups = (...names: string[]): GroupEntity[] => names.map((name, order) => ({ name, order }));
+const createGroups = (...names: string[]): GroupEntity[] =>
+  names.map((name, order) => ({ id: `G${order + 1}`, name, order }));
 
 const createCard = (
   id: string,

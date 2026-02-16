@@ -161,6 +161,7 @@ export interface CardRuntimeData {
 
 export interface Card {
   id: string;
+  business_id?: string;
   title: string;
   group: string;
   type: CardType;
@@ -191,6 +192,7 @@ export interface SectionMarker {
 }
 
 export interface GroupEntity {
+  id: string;
   name: string;
   order: number;
 }

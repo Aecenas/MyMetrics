@@ -41,6 +41,8 @@ const BACKUP_FILENAME_PREFIX = 'backup';
 const SCHEMA_VERSION = 5;
 const RESERVED_ALL_GROUP = 'All';
 const DEFAULT_GROUP_NAME = 'Default';
+const GROUP_ID_PATTERN = /^G(\d+)$/i;
+const CARD_BUSINESS_ID_PATTERN = /^G(\d+)-C(\d+)$/i;
 const MIN_BACKUP_RETENTION_COUNT = 3;
 const MAX_BACKUP_RETENTION_COUNT = 20;
 const DEFAULT_BACKUP_RETENTION_COUNT = 5;
@@ -76,21 +78,83 @@ const normalizeGroupName = (value: unknown): string => {
   const trimmed = String(value ?? '').trim();
   return trimmed.length > 0 ? trimmed : DEFAULT_GROUP_NAME;
 };
+const normalizeGroupId = (value: unknown): string | undefined => {
+  const raw = String(value ?? '').trim().toUpperCase();
+  const matched = GROUP_ID_PATTERN.exec(raw);
+  if (!matched) return undefined;
+  const number = Number.parseInt(matched[1], 10);
+  if (!Number.isInteger(number) || number <= 0) return undefined;
+  return `G${number}`;
+};
+const getGroupIdNumber = (groupId: string): number => {
+  const matched = GROUP_ID_PATTERN.exec(groupId);
+  if (!matched) return 0;
+  const number = Number.parseInt(matched[1], 10);
+  return Number.isInteger(number) && number > 0 ? number : 0;
+};
+const formatGroupId = (number: number): string => `G${Math.max(1, Math.floor(number))}`;
+const groupIdByName = (groups: GroupEntity[]): Map<string, string> =>
+  new Map(groups.map((group) => [group.name, group.id]));
+const parseBusinessId = (value: unknown): { groupId: string; cardNumber: number } | null => {
+  const raw = String(value ?? '').trim().toUpperCase();
+  const matched = CARD_BUSINESS_ID_PATTERN.exec(raw);
+  if (!matched) return null;
+  const groupNumber = Number.parseInt(matched[1], 10);
+  const cardNumber = Number.parseInt(matched[2], 10);
+  if (!Number.isInteger(groupNumber) || groupNumber <= 0 || !Number.isInteger(cardNumber) || cardNumber <= 0) {
+    return null;
+  }
+  return {
+    groupId: formatGroupId(groupNumber),
+    cardNumber,
+  };
+};
 const normalizeGroupEntities = (
   rawGroups: unknown,
   cards: Card[],
   sectionMarkers: SectionMarker[],
   activeGroup: unknown,
 ): GroupEntity[] => {
-  const orderedNames: string[] = [];
-  const seen = new Set<string>();
+  const ordered: Array<{ name: string; id?: string }> = [];
+  const seenNames = new Set<string>();
+  const seenIds = new Set<string>();
+  let maxIdNumber = 0;
   const hasExplicitGroups = Array.isArray(rawGroups);
-  const pushName = (value: unknown) => {
+
+  if (hasExplicitGroups) {
+    rawGroups.forEach((group: any) => {
+      const groupId = normalizeGroupId(group?.id);
+      if (!groupId) return;
+      maxIdNumber = Math.max(maxIdNumber, getGroupIdNumber(groupId));
+    });
+  }
+
+  const createGroupId = () => {
+    let candidate = maxIdNumber + 1;
+    while (seenIds.has(formatGroupId(candidate))) {
+      candidate += 1;
+    }
+    maxIdNumber = candidate;
+    const id = formatGroupId(candidate);
+    seenIds.add(id);
+    return id;
+  };
+
+  const pushGroup = (value: unknown, preferredId?: unknown) => {
     const name = normalizeGroupName(value);
     if (isAllGroupName(name)) return;
-    if (seen.has(name)) return;
-    seen.add(name);
-    orderedNames.push(name);
+    if (seenNames.has(name)) return;
+    seenNames.add(name);
+
+    const normalizedPreferredId = normalizeGroupId(preferredId);
+    let id: string | undefined = normalizedPreferredId;
+    if (!id || seenIds.has(id)) {
+      id = createGroupId();
+    } else {
+      seenIds.add(id);
+      maxIdNumber = Math.max(maxIdNumber, getGroupIdNumber(id));
+    }
+    ordered.push({ name, id });
   };
 
   if (hasExplicitGroups) {
@@ -102,27 +166,73 @@ const normalizeGroupEntities = (
         if (orderA !== orderB) return orderA - orderB;
         return String(a?.name ?? '').localeCompare(String(b?.name ?? ''));
       })
-      .forEach((group: any) => pushName(group?.name));
+      .forEach((group: any) => pushGroup(group?.name, group?.id));
   }
 
-  cards.forEach((card) => pushName(card.group));
+  cards.forEach((card) => pushGroup(card.group));
   if (hasExplicitGroups) {
-    sectionMarkers.forEach((section) => pushName(section.group));
+    sectionMarkers.forEach((section) => pushGroup(section.group));
     if (typeof activeGroup === 'string' && !isAllGroupName(activeGroup)) {
-      pushName(activeGroup);
+      pushGroup(activeGroup);
     }
   }
 
-  if (orderedNames.length === 0) {
-    orderedNames.push(DEFAULT_GROUP_NAME);
+  if (ordered.length === 0) {
+    pushGroup(DEFAULT_GROUP_NAME);
   }
 
-  return orderedNames.map((name, order) => ({ name, order }));
+  return ordered.map((group, order) => ({
+    id: group.id ?? createGroupId(),
+    name: group.name,
+    order,
+  }));
 };
 const normalizeActiveGroup = (value: unknown, groups: GroupEntity[]): string => {
   if (typeof value !== 'string') return RESERVED_ALL_GROUP;
   if (isAllGroupName(value)) return RESERVED_ALL_GROUP;
   return groups.some((group) => group.name === value) ? value : RESERVED_ALL_GROUP;
+};
+const normalizeCardBusinessIds = (cards: Card[], groups: GroupEntity[]): Card[] => {
+  const map = groupIdByName(groups);
+  const used = new Set<string>();
+  const maxByGroup = new Map<string, number>();
+  const validByCardId = new Map<string, string>();
+
+  cards.forEach((card) => {
+    const groupId = map.get(card.group);
+    if (!groupId) return;
+    const parsed = parseBusinessId(card.business_id);
+    if (!parsed) return;
+    if (parsed.groupId !== groupId) return;
+    const normalized = `${parsed.groupId}-C${parsed.cardNumber}`;
+    if (used.has(normalized)) return;
+    used.add(normalized);
+    validByCardId.set(card.id, normalized);
+    maxByGroup.set(groupId, Math.max(maxByGroup.get(groupId) ?? 0, parsed.cardNumber));
+  });
+
+  const nextBusinessId = (groupId: string) => {
+    let candidate = (maxByGroup.get(groupId) ?? 0) + 1;
+    let id = `${groupId}-C${candidate}`;
+    while (used.has(id)) {
+      candidate += 1;
+      id = `${groupId}-C${candidate}`;
+    }
+    used.add(id);
+    maxByGroup.set(groupId, candidate);
+    return id;
+  };
+
+  return cards.map((card) => {
+    const groupId = map.get(card.group);
+    if (!groupId) return card;
+    const business_id = validByCardId.get(card.id) ?? nextBusinessId(groupId);
+    if (card.business_id === business_id) return card;
+    return {
+      ...card,
+      business_id,
+    };
+  });
 };
 const normalizePathString = (value: unknown): string | undefined => {
   if (typeof value !== 'string') return undefined;
@@ -490,6 +600,7 @@ const normalizeCard = (rawCard: any, index: number, historyLimit: number): Card 
 
   const card: Card = {
     id: String(rawCard?.id ?? crypto.randomUUID()),
+    business_id: typeof rawCard?.business_id === 'string' ? rawCard.business_id : undefined,
     title: String(rawCard?.title ?? `Card ${index + 1}`),
     group: normalizeGroupName(rawCard?.group),
     type: cardType,
@@ -541,6 +652,7 @@ const migrateToLatest = (input: any): AppSettings => {
     normalizeSectionMarker(marker, index, dashboard_columns),
   );
   const groups = normalizeGroupEntities(input?.groups, cards, sectionMarkers, input?.activeGroup);
+  const cardsWithBusinessIds = normalizeCardBusinessIds(cards, groups);
   const activeGroup = normalizeActiveGroup(input?.activeGroup, groups);
 
   return {
@@ -560,7 +672,7 @@ const migrateToLatest = (input: any): AppSettings => {
     ),
     activeGroup,
     groups,
-    cards,
+    cards: cardsWithBusinessIds,
     section_markers: sectionMarkers,
     default_python_path:
       typeof input?.default_python_path === 'string' ? input.default_python_path : undefined,
@@ -610,6 +722,7 @@ const sanitizeForSave = (settings: AppSettings): AppSettings => {
     section_markers,
     (settings as Partial<AppSettings>).activeGroup,
   );
+  const cardsWithBusinessIds = normalizeCardBusinessIds(cards, groups);
   const activeGroup = normalizeActiveGroup((settings as Partial<AppSettings>).activeGroup, groups);
 
   return {
@@ -625,7 +738,7 @@ const sanitizeForSave = (settings: AppSettings): AppSettings => {
     groups,
     section_markers,
     default_python_path: settings.default_python_path,
-    cards,
+    cards: cardsWithBusinessIds,
   };
 };
 
