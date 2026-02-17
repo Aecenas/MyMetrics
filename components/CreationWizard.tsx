@@ -17,6 +17,7 @@ import {
   Plus,
   Loader2,
   FolderOpen,
+  FileText,
 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Button } from './ui/Button';
@@ -80,6 +81,9 @@ interface WizardForm {
   gaugeMaxKey: string;
   gaugeValueKey: string;
   gaugeUnitKey: string;
+  digestItemsKey: string;
+  digestTitleKey: string;
+  digestBodyKey: string;
   alertEnabled: boolean;
   alertCooldownSec: number;
   alertStatusChangeEnabled: boolean;
@@ -130,6 +134,9 @@ const defaultForm: WizardForm = {
   gaugeMaxKey: 'max',
   gaugeValueKey: 'value',
   gaugeUnitKey: 'unit',
+  digestItemsKey: 'items',
+  digestTitleKey: 'title',
+  digestBodyKey: 'body',
   alertEnabled: false,
   alertCooldownSec: 300,
   alertStatusChangeEnabled: true,
@@ -226,6 +233,11 @@ const buildMappingConfig = (form: WizardForm): MappingConfig => ({
     value_key: form.gaugeValueKey,
     unit_key: form.gaugeUnitKey || undefined,
   },
+  digest: {
+    items_key: form.digestItemsKey,
+    title_key: form.digestTitleKey,
+    body_key: form.digestBodyKey,
+  },
 });
 
 const createFormFromCard = (card: Card): WizardForm => {
@@ -264,6 +276,9 @@ const createFormFromCard = (card: Card): WizardForm => {
     gaugeMaxKey: card.mapping_config.gauge?.max_key ?? 'max',
     gaugeValueKey: card.mapping_config.gauge?.value_key ?? 'value',
     gaugeUnitKey: card.mapping_config.gauge?.unit_key ?? 'unit',
+    digestItemsKey: card.mapping_config.digest?.items_key ?? 'items',
+    digestTitleKey: card.mapping_config.digest?.title_key ?? 'title',
+    digestBodyKey: card.mapping_config.digest?.body_key ?? 'body',
     alertEnabled: alertConfig.enabled,
     alertCooldownSec: alertConfig.cooldown_sec,
     alertStatusChangeEnabled: alertConfig.status_change_enabled ?? true,
@@ -363,6 +378,9 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
     form.gaugeMaxKey,
     form.gaugeValueKey,
     form.gaugeUnitKey,
+    form.digestItemsKey,
+    form.digestTitleKey,
+    form.digestBodyKey,
   ]);
 
   useEffect(() => {
@@ -572,6 +590,12 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
       if (form.type === 'gauge') {
         if (!form.gaugeMinKey.trim() || !form.gaugeMaxKey.trim() || !form.gaugeValueKey.trim()) {
           setValidationError(tr('wizard.validation.gaugeFields'));
+          return false;
+        }
+      }
+      if (form.type === 'digest') {
+        if (!form.digestItemsKey.trim() || !form.digestTitleKey.trim() || !form.digestBodyKey.trim()) {
+          setValidationError(tr('wizard.validation.digestFields'));
           return false;
         }
       }
@@ -919,7 +943,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
 
       <div className="space-y-2">
         <label className="text-sm font-medium">{tr('wizard.visualizationType')}</label>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <div
             className={`border rounded-lg p-4 cursor-pointer hover:bg-secondary/50 transition-colors ${
               form.type === 'scalar' ? 'border-primary bg-secondary/50' : 'border-border'
@@ -959,6 +983,16 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
             <Gauge className="mb-2 text-primary" />
             <div className="font-medium">{tr('wizard.typeGauge')}</div>
             <div className="text-xs text-muted-foreground">{tr('wizard.typeGaugeDesc')}</div>
+          </div>
+          <div
+            className={`border rounded-lg p-4 cursor-pointer hover:bg-secondary/50 transition-colors ${
+              form.type === 'digest' ? 'border-primary bg-secondary/50' : 'border-border'
+            }`}
+            onClick={() => updateForm('type', 'digest')}
+          >
+            <FileText className="mb-2 text-primary" />
+            <div className="font-medium">{tr('wizard.typeDigest')}</div>
+            <div className="text-xs text-muted-foreground">{tr('wizard.typeDigestDesc')}</div>
           </div>
         </div>
       </div>
@@ -1279,6 +1313,15 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
     "message": "healthy"
   }
 }`
+      : form.type === 'digest'
+        ? `{
+  "type": "digest",
+  "data": {
+    "items": [
+      { "title": "Headline 1", "body": "Summary in markdown..." }
+    ]
+  }
+}`
       : `{
   "type": "gauge",
   "data": {
@@ -1435,6 +1478,35 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
         </div>
       )}
 
+      {form.type === 'digest' && (
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">{tr('wizard.digestItemsKey')}</label>
+            <input
+              className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm"
+              value={form.digestItemsKey}
+              onChange={(event) => updateForm('digestItemsKey', event.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">{tr('wizard.digestTitleKey')}</label>
+            <input
+              className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm"
+              value={form.digestTitleKey}
+              onChange={(event) => updateForm('digestTitleKey', event.target.value)}
+            />
+          </div>
+          <div className="space-y-2 col-span-2">
+            <label className="text-sm font-medium">{tr('wizard.digestBodyKey')}</label>
+            <input
+              className="w-full bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm"
+              value={form.digestBodyKey}
+              onChange={(event) => updateForm('digestBodyKey', event.target.value)}
+            />
+          </div>
+        </div>
+      )}
+
       <div className="rounded-lg border border-border/70 bg-secondary/20 p-3 text-xs text-muted-foreground">
         {tr('wizard.mappingHint')}
       </div>
@@ -1481,6 +1553,20 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
                   onChange={(event) => updateForm('alertStatusChangeEnabled', event.target.checked)}
                 />
                 <span>{tr('wizard.alerts.statusChange')}</span>
+              </label>
+            </div>
+          )}
+
+          {form.type === 'digest' && (
+            <div className="space-y-2">
+              <label className="text-sm font-medium">{tr('wizard.alerts.digestModeLabel')}</label>
+              <label className="inline-flex items-center gap-2 text-sm cursor-pointer mt-2">
+                <input
+                  type="checkbox"
+                  checked={form.alertStatusChangeEnabled}
+                  onChange={(event) => updateForm('alertStatusChangeEnabled', event.target.checked)}
+                />
+                <span>{tr('wizard.alerts.digestContentChange')}</span>
               </label>
             </div>
           )}
@@ -1568,6 +1654,25 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
           {fallbackToSingleLine && (
             <p className="text-sm text-amber-300">{tr('wizard.seriesFallbackToSingleLine')}</p>
           )}
+        </div>
+      );
+    }
+
+    if (form.type === 'digest') {
+      const payload = testResult.payload as any;
+      const items = Array.isArray(payload?.items) ? payload.items : [];
+      return (
+        <div className="w-full border border-indigo-500/30 bg-indigo-500/10 rounded-lg p-4 space-y-2">
+          <p className="text-xs uppercase text-indigo-300">{tr('wizard.digestPreview')}</p>
+          <p className="text-sm text-muted-foreground">{tr('wizard.digestItemsCount', { count: items.length })}</p>
+          <div className="space-y-2">
+            {items.slice(0, 2).map((item: any, index: number) => (
+              <div key={`${index}-${String(item?.title ?? '')}`} className="rounded border border-border/60 bg-secondary/20 p-2">
+                <p className="text-sm font-medium">{String(item?.title ?? '')}</p>
+                <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{String(item?.body ?? '')}</p>
+              </div>
+            ))}
+          </div>
         </div>
       );
     }

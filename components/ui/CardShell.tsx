@@ -82,7 +82,12 @@ export const CardShell: React.FC<CardShellProps> = ({
   const isError = card.runtimeData?.state === 'error';
   const isSeriesCard = card.type === 'series';
   const isGaugeCard = card.type === 'gauge';
-  const contentSpacingClass = isSeriesCard ? 'px-4 pt-0 pb-1' : isGaugeCard ? 'px-4 pt-0 pb-0' : 'p-4 pt-0 justify-center';
+  const isDigestCard = card.type === 'digest';
+  const contentSpacingClass = isSeriesCard
+    ? 'px-4 pt-0 pb-1'
+    : isGaugeCard || isDigestCard
+      ? 'px-4 pt-0 pb-0'
+      : 'p-4 pt-0 justify-center';
   const footerClassName = isGaugeCard
     ? 'h-7 shrink-0 px-4 pt-0.5 flex items-start justify-between text-[11px] text-muted-foreground/90'
     : 'h-8 shrink-0 px-4 flex items-center justify-between text-[11px] text-muted-foreground/90';
@@ -283,7 +288,7 @@ export const CardShell: React.FC<CardShellProps> = ({
             <AlertTriangle
               size={14}
               className="text-destructive shrink-0"
-              title={tr('cardShell.thresholdAlertTriggered')}
+              aria-label={tr('cardShell.thresholdAlertTriggered')}
             />
           )}
           <div className="min-w-0">

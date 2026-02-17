@@ -23,6 +23,9 @@ These scripts are for manual validation in Tauri mode (`npm run tauri:dev`).
 - `gauge_ok.py`
   - Card type: `gauge`
   - Expected: gauge card renders min/max/value(unit) with needle position
+- `digest_ok.py`
+  - Card type: `digest`
+  - Expected: digest card renders grouped title/body content and supports full preview on overflow
 
 ## Mapping Case
 
@@ -56,6 +59,7 @@ These scripts are for manual validation in Tauri mode (`npm run tauri:dev`).
 - `series_dual_axis_double_line_ok.py --points 24 --step 0.5`
 - `status_ok.py --label redis --state critical --message "replication lag high"`
 - `gauge_ok.py --min 0 --max 100 --value 80 --unit "%" --jitter 2 --seed 7`
+- `digest_ok.py --count 5 --prefix "News" --body-template "Summary for item {index}."`
 - `timeout_sleep.py --sleep 20`
 - `wrong_type.py --actual-type status`
 - `stderr_nonzero.py --code 3 --stderr "mock failure"`

@@ -125,6 +125,50 @@ describe('execution contract normalize', () => {
     });
   });
 
+  it('normalizes digest payload with custom mapping', () => {
+    const payload = __testables.normalizePayload(
+      {
+        type: 'digest',
+        data: {
+          blocks: [
+            { heading: 'A', content: 'alpha' },
+            { heading: 'B', content: 'beta' },
+          ],
+        },
+      },
+      'digest',
+      {
+        digest: {
+          items_key: 'blocks',
+          title_key: 'heading',
+          body_key: 'content',
+        },
+      },
+    );
+
+    expect(payload).toEqual({
+      items: [
+        { title: 'A', body: 'alpha' },
+        { title: 'B', body: 'beta' },
+      ],
+    });
+  });
+
+  it('throws when digest item body is missing', () => {
+    expect(() =>
+      __testables.normalizePayload(
+        {
+          type: 'digest',
+          data: {
+            items: [{ title: 'A' }],
+          },
+        },
+        'digest',
+        {},
+      ),
+    ).toThrow(/digest/i);
+  });
+
   it('throws when type does not match card type', () => {
     expect(() =>
       __testables.normalizePayload(

@@ -5,12 +5,14 @@ import { ScalarCard } from './cards/ScalarCard';
 import { SeriesCard } from './cards/SeriesCard';
 import { StatusCard } from './cards/StatusCard';
 import { GaugeCard } from './cards/GaugeCard';
+import { DigestCard } from './cards/DigestCard';
 import { Plus, LayoutTemplate, Check, RefreshCw, X } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Card, SectionMarker } from '../types';
 import { t } from '../i18n';
 import { getCardLayoutPosition } from '../layout';
 import { CardHistoryDialog } from './CardHistoryDialog';
+import { DigestPreviewDialog } from './DigestPreviewDialog';
 import { interactionSoundService } from '../services/interaction-sound';
 
 interface DashboardProps {
@@ -142,6 +144,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
     nonce: 0,
   });
   const [historyCardId, setHistoryCardId] = useState<string | null>(null);
+  const [digestPreviewCardId, setDigestPreviewCardId] = useState<string | null>(null);
   const [sectionDialog, setSectionDialog] = useState<SectionDialogState | null>(null);
   const [sectionDialogError, setSectionDialogError] = useState<string>('');
   const [copyDialog, setCopyDialog] = useState<CopyDialogState | null>(null);
@@ -201,6 +204,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
     () => visibleCards.find((card) => card.id === historyCardId) ?? null,
     [visibleCards, historyCardId],
   );
+  const digestPreviewCard = useMemo(
+    () => visibleCards.find((card) => card.id === digestPreviewCardId) ?? null,
+    [visibleCards, digestPreviewCardId],
+  );
 
   useEffect(() => {
     if (!isEditMode) {
@@ -229,6 +236,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
       setHistoryCardId(null);
     }
   }, [historyCardId, historyCard]);
+
+  useEffect(() => {
+    if (digestPreviewCardId && !digestPreviewCard) {
+      setDigestPreviewCardId(null);
+    }
+  }, [digestPreviewCard, digestPreviewCardId]);
 
   useEffect(() => {
     if (!isEditMode) return;
@@ -485,10 +498,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
     setHistoryCardId(null);
   };
 
+  const openDigestPreviewDialog = (cardId: string) => {
+    interactionSoundService.play('modal.open');
+    setDigestPreviewCardId(cardId);
+  };
+
+  const closeDigestPreviewDialog = () => {
+    interactionSoundService.play('modal.close');
+    setDigestPreviewCardId(null);
+  };
+
   const renderCard = (card: Card) => {
     if (card.type === 'scalar') return <ScalarCard card={card} />;
     if (card.type === 'series') return <SeriesCard card={card} />;
     if (card.type === 'status') return <StatusCard card={card} />;
+    if (card.type === 'digest') {
+      return <DigestCard card={card} onOpenPreview={() => openDigestPreviewDialog(card.id)} />;
+    }
     return <GaugeCard card={card} />;
   };
 
@@ -924,6 +950,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
       )}
 
       <CardHistoryDialog card={historyCard} onClose={closeHistoryDialog} />
+      <DigestPreviewDialog card={digestPreviewCard} onClose={closeDigestPreviewDialog} />
     </div>
   );
 };

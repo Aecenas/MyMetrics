@@ -3,6 +3,7 @@ import {
   CardAlertState,
   CardType,
   NormalizedCardPayload,
+  ScriptOutputDigest,
   ScriptOutputGauge,
   ScriptOutputScalar,
   ScriptOutputStatus,
@@ -48,6 +49,7 @@ export const normalizeAlertConfig = (config?: Partial<CardAlertConfig> | null): 
 };
 
 export const createDefaultAlertState = (): CardAlertState => ({
+  last_digest_signature: undefined,
   condition_last_trigger_at: {},
 });
 
@@ -65,11 +67,13 @@ export const normalizeAlertState = (state?: Partial<CardAlertState> | null): Car
 
   return {
     last_status_state: normalizeState(state?.last_status_state),
+    last_digest_signature:
+      typeof state?.last_digest_signature === 'string' ? state.last_digest_signature : undefined,
     condition_last_trigger_at: normalized,
   };
 };
 
-export type AlertTriggerReason = 'status_change' | 'upper_threshold' | 'lower_threshold';
+export type AlertTriggerReason = 'status_change' | 'content_change' | 'upper_threshold' | 'lower_threshold';
 
 export interface AlertTriggerEvent {
   conditionKey: string;
@@ -144,6 +148,9 @@ const shouldTrigger = (
   return now - lastTriggeredAt >= cooldownMs;
 };
 
+const createDigestSignature = (payload: ScriptOutputDigest): string =>
+  JSON.stringify(payload.items.map((item) => ({ title: item.title, body: item.body })));
+
 export const evaluateCardAlert = ({
   cardType,
   payload,
@@ -155,6 +162,31 @@ export const evaluateCardAlert = ({
   const nextState = normalizeAlertState(state);
   const events: AlertTriggerEvent[] = [];
   const cooldownMs = Math.max(0, normalizedConfig.cooldown_sec * 1000);
+
+  if (cardType === 'digest') {
+    const digestPayload = payload as ScriptOutputDigest;
+    const previousSignature = nextState.last_digest_signature;
+    const currentSignature = createDigestSignature(digestPayload);
+
+    if (
+      normalizedConfig.enabled &&
+      normalizedConfig.status_change_enabled &&
+      previousSignature &&
+      previousSignature !== currentSignature
+    ) {
+      const conditionKey = 'content_change';
+      if (shouldTrigger(conditionKey, now, cooldownMs, nextState)) {
+        nextState.condition_last_trigger_at[conditionKey] = now;
+        events.push({
+          conditionKey,
+          reason: 'content_change',
+        });
+      }
+    }
+
+    nextState.last_digest_signature = currentSignature;
+    return { events, nextState };
+  }
 
   if (cardType === 'status') {
     const statusPayload = payload as ScriptOutputStatus;

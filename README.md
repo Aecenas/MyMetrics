@@ -11,7 +11,7 @@
 
 <p align="center">
   <img alt="Version" src="https://img.shields.io/badge/version-v0.2.0-1f6feb?style=for-the-badge" />
-  <img alt="Schema" src="https://img.shields.io/badge/schema-v7-f59e0b?style=for-the-badge" />
+  <img alt="Schema" src="https://img.shields.io/badge/schema-v8-f59e0b?style=for-the-badge" />
   <img alt="Tauri" src="https://img.shields.io/badge/Tauri-v2-24C8DB?style=for-the-badge&logo=tauri&logoColor=white" />
   <img alt="React" src="https://img.shields.io/badge/React-19-149ECA?style=for-the-badge&logo=react&logoColor=white" />
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=white" />
@@ -79,12 +79,13 @@
 
 ## 🧩 卡片类型
 
-支持 4 类卡片，统一协议但独立映射：
+支持 5 类卡片，统一协议但独立映射：
 
 - `scalar`：单值指标（如温度、余额、CPU）
 - `series`：时序/序列（单轴单线 / 单轴双线 / 双轴双线）
 - `status`：状态卡（`ok/warning/error/unknown`）
 - `gauge`：仪表盘（`min/max/value`）
+- `digest`：分组文本（`items[].title + items[].body`）
 
 <a id="quick-start"></a>
 ## 🚀 快速开始
@@ -132,7 +133,7 @@ npm run tauri:build
 
 ```json
 {
-  "type": "scalar | series | status | gauge",
+  "type": "scalar | series | status | gauge | digest",
   "data": {}
 }
 ```
@@ -145,6 +146,7 @@ npm run tauri:build
 | `series` | `x_axis`（数组）+ `series`（数组，元素含 `name/values`）；双线模式固定使用前两条 `series` |
 | `status` | `label/state`（必填），可带 `message` |
 | `gauge` | `min/max/value`（必填），且 `max > min` |
+| `digest` | `items`（数组，元素含 `title/body`） |
 
 ### Series 子模式说明
 
@@ -232,7 +234,7 @@ flowchart LR
 | 主配置文件 | 默认在 Tauri `AppLocalData/data/user_settings.json` |
 | 自定义数据目录 | 通过 `storage_config.json` 指针记录 |
 | 备份目录 | 默认 `data/backups/` |
-| schema 版本 | 当前 `schema_version = 7`（自动迁移） |
+| schema 版本 | 当前 `schema_version = 8`（自动迁移） |
 
 ### 核心配置项（含范围）
 
@@ -254,7 +256,7 @@ flowchart LR
 
 ```json
 {
-  "schema_version": 7,
+  "schema_version": 8,
   "theme": "light | dark",
   "language": "zh-CN | en-US",
   "dashboard_columns": 4,
@@ -315,7 +317,7 @@ CI 工作流：
 ```text
 .
 ├── components/              # 页面与 UI 组件
-│   ├── cards/               # scalar / series / status / gauge
+│   ├── cards/               # scalar / series / status / gauge / digest
 │   └── ...
 ├── services/                # execution / storage / alerts / diagnostics / tests
 ├── src-tauri/               # Rust 命令层与 Tauri 配置
@@ -373,9 +375,9 @@ CI 工作流：
 **MyMetrics** is a local-first desktop dashboard built with **Tauri + React + TypeScript**.  
 You provide local Python scripts as data sources; MyMetrics handles visualization, scheduling, alerting, diagnostics, and persistence.
 
-- 4 card types: `scalar`, `series`, `status`, `gauge`
+- 5 card types: `scalar`, `series`, `status`, `gauge`, `digest`
 - 5-step creation wizard with script validation and live preview
-- Local JSON storage with schema migration (`schema_version = 7`)
+- Local JSON storage with schema migration (`schema_version = 8`)
 - Backup rotation, diagnostics, notification alerts, and group-level operations
 
 For full details, read:

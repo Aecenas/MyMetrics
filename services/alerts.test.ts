@@ -170,6 +170,63 @@ describe('alert evaluation', () => {
     expect(active).toBe(true);
   });
 
+  it('does not trigger for first digest sample but records signature', () => {
+    const result = evaluateCardAlert({
+      cardType: 'digest',
+      payload: {
+        items: [{ title: 'News', body: 'Hello' }],
+      },
+      config: {
+        enabled: true,
+        cooldown_sec: 60,
+        status_change_enabled: true,
+      },
+      state: undefined,
+      now: 1_000,
+    });
+
+    expect(result.events).toEqual([]);
+    expect(result.nextState.last_digest_signature).toBeDefined();
+  });
+
+  it('triggers digest content change and applies cooldown', () => {
+    const first = evaluateCardAlert({
+      cardType: 'digest',
+      payload: {
+        items: [{ title: 'News', body: 'v2' }],
+      },
+      config: {
+        enabled: true,
+        cooldown_sec: 60,
+        status_change_enabled: true,
+      },
+      state: {
+        last_digest_signature: JSON.stringify([{ title: 'News', body: 'v1' }]),
+        condition_last_trigger_at: {},
+      },
+      now: 10_000,
+    });
+
+    expect(first.events).toHaveLength(1);
+    expect(first.events[0].reason).toBe('content_change');
+
+    const second = evaluateCardAlert({
+      cardType: 'digest',
+      payload: {
+        items: [{ title: 'News', body: 'v3' }],
+      },
+      config: {
+        enabled: true,
+        cooldown_sec: 60,
+        status_change_enabled: true,
+      },
+      state: first.nextState,
+      now: 20_000,
+    });
+
+    expect(second.events).toEqual([]);
+  });
+
   it('reports threshold alert as inactive for non-threshold card types', () => {
     const active = isThresholdAlertActive({
       cardType: 'status',

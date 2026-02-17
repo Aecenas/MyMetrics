@@ -61,7 +61,7 @@ describe('storage migration', () => {
 
     const migrated = storageMigration.migrateToLatest(legacy);
 
-    expect(migrated.schema_version).toBe(7);
+    expect(migrated.schema_version).toBe(8);
     expect(migrated.language).toBe('zh-CN');
     expect(migrated.dashboard_columns).toBe(4);
     expect(migrated.adaptive_window_enabled).toBe(true);
@@ -117,6 +117,7 @@ describe('storage migration', () => {
     });
     expect(card.alert_state).toEqual({
       last_status_state: undefined,
+      last_digest_signature: undefined,
       condition_last_trigger_at: {},
     });
     expect(card.execution_history).toBeUndefined();
@@ -145,6 +146,31 @@ describe('storage migration', () => {
       max_key: 'max',
       value_key: 'value',
       unit_key: 'unit',
+    });
+  });
+
+  it('keeps digest type and default digest mapping keys', () => {
+    const migrated = storageMigration.migrateToLatest({
+      cards: [
+        {
+          id: 'digest-1',
+          title: 'Daily brief',
+          group: 'News',
+          type: 'digest',
+          script_config: {
+            path: '/tmp/digest.py',
+            args: [],
+          },
+        },
+      ],
+    });
+
+    const card = migrated.cards[0];
+    expect(card.type).toBe('digest');
+    expect(card.mapping_config.digest).toEqual({
+      items_key: 'items',
+      title_key: 'title',
+      body_key: 'body',
     });
   });
 
@@ -251,7 +277,7 @@ describe('storage migration', () => {
 
   it('keeps an explicitly configured series mode', () => {
     const migrated = storageMigration.migrateToLatest({
-      schema_version: 7,
+      schema_version: 8,
       cards: [
         {
           id: 'series-1',

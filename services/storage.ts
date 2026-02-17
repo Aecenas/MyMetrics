@@ -49,7 +49,7 @@ const DATA_FILENAME = 'user_settings.json';
 const DEFAULT_SUBDIR = 'data';
 const DEFAULT_BACKUP_SUBDIR = 'backups';
 const BACKUP_FILENAME_PREFIX = 'backup';
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 const RESERVED_ALL_GROUP = 'All';
 const DEFAULT_GROUP_NAME = 'Default';
 const GROUP_ID_PATTERN = /^G(\d+)$/i;
@@ -520,6 +520,16 @@ const createDefaultMapping = (cardType: Card['type']): MappingConfig => {
     };
   }
 
+  if (cardType === 'digest') {
+    return {
+      digest: {
+        items_key: 'items',
+        title_key: 'title',
+        body_key: 'body',
+      },
+    };
+  }
+
   return {
     gauge: {
       min_key: 'min',
@@ -591,6 +601,10 @@ const normalizeMapping = (rawMapping: any, cardType: Card['type']): MappingConfi
       ...(legacyGauge ?? {}),
       ...(rawMapping.gauge ?? {}),
     },
+    digest: {
+      ...(defaults.digest ?? {}),
+      ...(rawMapping.digest ?? {}),
+    },
   };
 };
 
@@ -647,7 +661,8 @@ const normalizeCard = (rawCard: any, index: number, historyLimit: number): Card 
     rawCard?.type === 'scalar' ||
     rawCard?.type === 'series' ||
     rawCard?.type === 'status' ||
-    rawCard?.type === 'gauge'
+    rawCard?.type === 'gauge' ||
+    rawCard?.type === 'digest'
       ? rawCard.type
       : 'scalar';
 

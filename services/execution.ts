@@ -5,6 +5,7 @@ import {
   CardType,
   MappingConfig,
   NormalizedCardPayload,
+  ScriptOutputDigest,
   ScriptOutputGauge,
   ScriptOutputScalar,
   ScriptOutputSeries,
@@ -229,6 +230,50 @@ const normalizeGauge = (data: unknown, mapping: MappingConfig): ScriptOutputGaug
   };
 };
 
+const normalizeDigest = (data: unknown, mapping: MappingConfig): ScriptOutputDigest => {
+  const digestMapping = {
+    items_key: 'items',
+    title_key: 'title',
+    body_key: 'body',
+    ...(mapping.digest ?? {}),
+  };
+
+  const itemsRaw = readPath(data, digestMapping.items_key);
+  if (!Array.isArray(itemsRaw)) {
+    throw new Error(tr('exec.mappingDigestItemsNotArray', { path: digestMapping.items_key }));
+  }
+
+  return {
+    items: itemsRaw.map((item, index) => {
+      const title = readPath(item, digestMapping.title_key);
+      const body = readPath(item, digestMapping.body_key);
+
+      if (title === undefined || title === null) {
+        throw new Error(
+          tr('exec.mappingDigestTitleMissing', {
+            path: digestMapping.title_key,
+            index,
+          }),
+        );
+      }
+
+      if (body === undefined || body === null) {
+        throw new Error(
+          tr('exec.mappingDigestBodyMissing', {
+            path: digestMapping.body_key,
+            index,
+          }),
+        );
+      }
+
+      return {
+        title: String(title),
+        body: String(body),
+      };
+    }),
+  };
+};
+
 const normalizePayload = (output: any, type: CardType, mapping: MappingConfig): NormalizedCardPayload => {
   if (!output || typeof output !== 'object') {
     throw new Error(tr('exec.outputNotObject'));
@@ -249,6 +294,7 @@ const normalizePayload = (output: any, type: CardType, mapping: MappingConfig): 
   if (type === 'scalar') return normalizeScalar(output.data, mapping);
   if (type === 'series') return normalizeSeries(output.data, mapping);
   if (type === 'status') return normalizeStatus(output.data, mapping);
+  if (type === 'digest') return normalizeDigest(output.data, mapping);
   return normalizeGauge(output.data, mapping);
 };
 

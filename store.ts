@@ -848,6 +848,12 @@ const buildAlertNotificationBody = (
     });
   }
 
+  if (event.reason === 'content_change') {
+    return t(language, 'alerts.contentChangedBody', {
+      cardTitle,
+    });
+  }
+
   if (event.reason === 'upper_threshold') {
     return t(language, 'alerts.upperThresholdBody', {
       cardTitle,

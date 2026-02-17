@@ -1,4 +1,4 @@
-export type CardType = 'scalar' | 'series' | 'status' | 'gauge';
+export type CardType = 'scalar' | 'series' | 'status' | 'gauge' | 'digest';
 
 export type RuntimeState = 'idle' | 'loading' | 'success' | 'error';
 export type AppLanguage = 'en-US' | 'zh-CN';
@@ -36,6 +36,12 @@ export interface GaugeMappingConfig {
   unit_key?: string;
 }
 
+export interface DigestMappingConfig {
+  items_key: string;
+  title_key: string;
+  body_key: string;
+}
+
 export interface CardAlertConfig {
   enabled: boolean;
   cooldown_sec: number;
@@ -46,6 +52,7 @@ export interface CardAlertConfig {
 
 export interface CardAlertState {
   last_status_state?: ScriptOutputStatus['state'];
+  last_digest_signature?: string;
   condition_last_trigger_at: Record<string, number>;
 }
 
@@ -54,6 +61,7 @@ export interface MappingConfig {
   series?: SeriesMappingConfig;
   status?: StatusMappingConfig;
   gauge?: GaugeMappingConfig;
+  digest?: DigestMappingConfig;
 }
 
 export interface RefreshConfig {
@@ -153,11 +161,21 @@ export interface ScriptOutputGauge {
   unit?: string;
 }
 
+export interface ScriptOutputDigestItem {
+  title: string;
+  body: string;
+}
+
+export interface ScriptOutputDigest {
+  items: ScriptOutputDigestItem[];
+}
+
 export type NormalizedCardPayload =
   | ScriptOutputScalar
   | ScriptOutputSeries
   | ScriptOutputStatus
-  | ScriptOutputGauge;
+  | ScriptOutputGauge
+  | ScriptOutputDigest;
 
 export interface CacheData {
   last_success_payload?: NormalizedCardPayload;
