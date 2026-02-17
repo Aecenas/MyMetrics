@@ -200,6 +200,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
     () => displayedCards.find((card) => card.id === selectedCardId) ?? null,
     [displayedCards, selectedCardId],
   );
+  const selectedCardDisplayId = selectedCard?.business_id?.trim() || selectedCard?.id || '-';
   const historyCard = useMemo(
     () => visibleCards.find((card) => card.id === historyCardId) ?? null,
     [visibleCards, historyCardId],
@@ -589,7 +590,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAddClick, onEditCard }) 
           <div className="font-medium text-primary">{tr('dashboard.layoutEditHint')}</div>
           <div className="text-xs text-muted-foreground mt-1">
             {selectedCard
-              ? tr('dashboard.layoutEditSelected', { title: selectedCard.title })
+              ? tr('dashboard.layoutEditSelected', { title: selectedCard.title, id: selectedCardDisplayId })
               : tr('dashboard.layoutEditNoSelection')}
           </div>
         </div>

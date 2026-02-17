@@ -29,7 +29,7 @@ const translations: Record<AppLanguage, TranslationMap> = {
     'dashboard.addSection': 'Add Section',
     'dashboard.layoutEditHint':
       'Layout edit mode: click a card first, then use arrow keys to move it.',
-    'dashboard.layoutEditSelected': 'Selected card: {title}',
+    'dashboard.layoutEditSelected': 'Selected card: {title} (ID: {id})',
     'dashboard.layoutEditNoSelection': 'No card selected in this group.',
     'dashboard.sectionPickGroup': 'Select a specific group before adding a section.',
     'dashboard.sectionDefaultTitle': 'Section {index}',
@@ -610,7 +610,7 @@ const translations: Record<AppLanguage, TranslationMap> = {
     'dashboard.addCard': '添加卡片',
     'dashboard.addSection': '添加分段',
     'dashboard.layoutEditHint': '布局编辑模式：先点击卡片，再用方向键移动。',
-    'dashboard.layoutEditSelected': '当前选中：{title}',
+    'dashboard.layoutEditSelected': '当前选中：{title}（ID：{id}）',
     'dashboard.layoutEditNoSelection': '当前分组没有可编辑的卡片。',
     'dashboard.sectionPickGroup': '请先切换到具体分组，再添加分段。',
     'dashboard.sectionDefaultTitle': '分段 {index}',

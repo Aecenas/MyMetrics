@@ -12,6 +12,7 @@ import {
   CircleAlert,
   AlertTriangle,
   History,
+  Check,
 } from 'lucide-react';
 import { useStore } from '../../store';
 import { Button } from './Button';
@@ -94,13 +95,15 @@ export const CardShell: React.FC<CardShellProps> = ({
   const thresholdAlertTriggered = Boolean(card.runtimeData?.thresholdAlertTriggered);
   const [thresholdPulseActive, setThresholdPulseActive] = React.useState(false);
   const previousThresholdAlertRef = React.useRef(thresholdAlertTriggered);
+  const isSelectedInEditMode = isEditMode && Boolean(isSelected);
   const thresholdAlertBackgroundClass =
-    thresholdAlertTriggered && !(isEditMode && isSelected) ? 'bg-destructive/[0.06]' : '';
+    thresholdAlertTriggered && !isSelectedInEditMode ? 'bg-destructive/[0.06]' : '';
   const thresholdAlertBorderClass = thresholdAlertTriggered
     ? 'border-destructive/60 shadow-[0_0_0_1px_hsl(var(--destructive)/0.24)]'
     : '';
+  const selectedHighlightClass = isSelectedInEditMode ? 'ring-2 ring-inset ring-primary/75 shadow-lg shadow-primary/20' : '';
   const selectedInvertedClass =
-    isEditMode && isSelected
+    isSelectedInEditMode
       ? theme === 'dark'
         ? 'bg-white text-slate-900 border-slate-200'
         : 'bg-slate-100 text-slate-900 border-slate-300'
@@ -198,7 +201,7 @@ export const CardShell: React.FC<CardShellProps> = ({
   React.useEffect(() => {
     const node = cardRef.current;
     if (!node) return;
-    if (!isEditMode || !isSelected) return;
+    if (!isSelectedInEditMode) return;
     if (!failedMoveSignal || failedMoveSignal < 1) return;
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
@@ -218,7 +221,7 @@ export const CardShell: React.FC<CardShellProps> = ({
         easing: 'cubic-bezier(0.36, 0.07, 0.19, 0.97)',
       },
     );
-  }, [failedMoveSignal, isEditMode, isSelected]);
+  }, [failedMoveSignal, isSelectedInEditMode]);
 
   React.useEffect(() => {
     if (!menuOpen) return;
@@ -268,6 +271,7 @@ export const CardShell: React.FC<CardShellProps> = ({
         ${isEditMode ? 'cursor-pointer z-20 outline-none' : 'z-10'}
         ${isEditMode ? 'hover:shadow-md' : ''}
         ${selectedInvertedClass}
+        ${selectedHighlightClass}
         ${thresholdAlertBackgroundClass}
         ${thresholdAlertBorderClass}
         h-full
@@ -282,6 +286,14 @@ export const CardShell: React.FC<CardShellProps> = ({
         />
       )}
       {thresholdAlertTriggered && <div aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-destructive/80" />}
+      {isSelectedInEditMode && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute right-2 top-2 z-30 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm"
+        >
+          <Check size={12} />
+        </div>
+      )}
       <div className="flex items-center justify-between p-4 pb-2 select-none gap-2">
         <div className="min-w-0 flex items-center gap-1.5">
           {thresholdAlertTriggered && (
