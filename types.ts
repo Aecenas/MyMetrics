@@ -76,6 +76,7 @@ export type ScalarContentPosition =
 
 export type VerticalContentPosition = 'top' | 'center' | 'bottom';
 export type TextSizePreset = 'small' | 'medium' | 'large';
+export type SeriesMode = 'single_axis_single_line' | 'single_axis_double_line' | 'dual_axis_double_line';
 
 export const SCALAR_CONTENT_POSITIONS: ScalarContentPosition[] = [
   'top-left',
@@ -91,12 +92,18 @@ export const SCALAR_CONTENT_POSITIONS: ScalarContentPosition[] = [
 
 export const VERTICAL_CONTENT_POSITIONS: VerticalContentPosition[] = ['top', 'center', 'bottom'];
 export const TEXT_SIZE_PRESETS: TextSizePreset[] = ['small', 'medium', 'large'];
+export const SERIES_MODES: SeriesMode[] = [
+  'single_axis_single_line',
+  'single_axis_double_line',
+  'dual_axis_double_line',
+];
 
 export interface UIConfig {
   color_theme: 'default' | 'blue' | 'green' | 'red' | 'yellow' | 'purple';
   size: '1x1' | '2x1' | '1x2' | '2x2';
   x: number;
   y: number;
+  series_mode?: SeriesMode;
   scalar_position?: ScalarContentPosition;
   scalar_text_size?: TextSizePreset;
   status_vertical_position?: VerticalContentPosition;

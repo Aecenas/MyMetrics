@@ -11,7 +11,7 @@
 
 <p align="center">
   <img alt="Version" src="https://img.shields.io/badge/version-v0.2.0-1f6feb?style=for-the-badge" />
-  <img alt="Schema" src="https://img.shields.io/badge/schema-v6-f59e0b?style=for-the-badge" />
+  <img alt="Schema" src="https://img.shields.io/badge/schema-v7-f59e0b?style=for-the-badge" />
   <img alt="Tauri" src="https://img.shields.io/badge/Tauri-v2-24C8DB?style=for-the-badge&logo=tauri&logoColor=white" />
   <img alt="React" src="https://img.shields.io/badge/React-19-149ECA?style=for-the-badge&logo=react&logoColor=white" />
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=white" />
@@ -82,7 +82,7 @@
 支持 4 类卡片，统一协议但独立映射：
 
 - `scalar`：单值指标（如温度、余额、CPU）
-- `series`：时序/序列（折线或多序列图）
+- `series`：时序/序列（单轴单线 / 单轴双线 / 双轴双线）
 - `status`：状态卡（`ok/warning/error/unknown`）
 - `gauge`：仪表盘（`min/max/value`）
 
@@ -142,9 +142,16 @@ npm run tauri:build
 | type | data 要点 |
 | --- | --- |
 | `scalar` | `value`（必填），可带 `unit/trend/color` |
-| `series` | `x_axis`（数组）+ `series`（数组，元素含 `name/values`） |
+| `series` | `x_axis`（数组）+ `series`（数组，元素含 `name/values`）；双线模式固定使用前两条 `series` |
 | `status` | `label/state`（必填），可带 `message` |
 | `gauge` | `min/max/value`（必填），且 `max > min` |
+
+### Series 子模式说明
+
+- `single_axis_single_line`：左侧单 Y 轴，绘制第 1 条线。
+- `single_axis_double_line`：左侧单 Y 轴，绘制前 2 条线并显示图例。
+- `dual_axis_double_line`：左右双 Y 轴，前 2 条线分别绑定左右轴并显示图例。
+- 当卡片配置为双线但脚本只返回 1 条线时，会自动回退单线并给出提示。
 
 ### 协议补充规则
 
@@ -225,7 +232,7 @@ flowchart LR
 | 主配置文件 | 默认在 Tauri `AppLocalData/data/user_settings.json` |
 | 自定义数据目录 | 通过 `storage_config.json` 指针记录 |
 | 备份目录 | 默认 `data/backups/` |
-| schema 版本 | 当前 `schema_version = 6`（自动迁移） |
+| schema 版本 | 当前 `schema_version = 7`（自动迁移） |
 
 ### 核心配置项（含范围）
 
@@ -247,7 +254,7 @@ flowchart LR
 
 ```json
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "theme": "light | dark",
   "language": "zh-CN | en-US",
   "dashboard_columns": 4,
@@ -368,7 +375,7 @@ You provide local Python scripts as data sources; MyMetrics handles visualizatio
 
 - 4 card types: `scalar`, `series`, `status`, `gauge`
 - 5-step creation wizard with script validation and live preview
-- Local JSON storage with schema migration (`schema_version = 6`)
+- Local JSON storage with schema migration (`schema_version = 7`)
 - Backup rotation, diagnostics, notification alerts, and group-level operations
 
 For full details, read:

@@ -25,6 +25,7 @@ import {
   Card,
   CardType,
   MappingConfig,
+  SeriesMode,
   UIConfig,
   ScalarContentPosition,
   TextSizePreset,
@@ -35,6 +36,11 @@ import { ArgParseError, formatScriptArgs, parseScriptArgs } from '../services/ar
 import { normalizeAlertConfig } from '../services/alerts';
 import { t } from '../i18n';
 import { interactionSoundService } from '../services/interaction-sound';
+import {
+  normalizeSeriesMode,
+  SERIES_MODE_DEFAULT,
+  shouldFallbackToSingleLine,
+} from '../services/series-chart';
 
 interface CreationWizardProps {
   onClose: () => void;
@@ -66,6 +72,7 @@ interface WizardForm {
   seriesKey: string;
   seriesNameKey: string;
   seriesValuesKey: string;
+  seriesMode: SeriesMode;
   statusLabelKey: string;
   statusStateKey: string;
   statusMessageKey: string;
@@ -115,6 +122,7 @@ const defaultForm: WizardForm = {
   seriesKey: 'series',
   seriesNameKey: 'name',
   seriesValuesKey: 'values',
+  seriesMode: SERIES_MODE_DEFAULT,
   statusLabelKey: 'label',
   statusStateKey: 'state',
   statusMessageKey: 'message',
@@ -162,6 +170,24 @@ const textSizeOptions: Array<{ value: TextSizePreset; labelKey: string }> = [
   { value: 'small', labelKey: 'wizard.textSizeSmall' },
   { value: 'medium', labelKey: 'wizard.textSizeMedium' },
   { value: 'large', labelKey: 'wizard.textSizeLarge' },
+];
+
+const seriesModeOptions: Array<{ value: SeriesMode; labelKey: string; descKey: string }> = [
+  {
+    value: 'single_axis_single_line',
+    labelKey: 'wizard.seriesMode.option.singleAxisSingleLine',
+    descKey: 'wizard.seriesMode.option.singleAxisSingleLineDesc',
+  },
+  {
+    value: 'single_axis_double_line',
+    labelKey: 'wizard.seriesMode.option.singleAxisDoubleLine',
+    descKey: 'wizard.seriesMode.option.singleAxisDoubleLineDesc',
+  },
+  {
+    value: 'dual_axis_double_line',
+    labelKey: 'wizard.seriesMode.option.dualAxisDoubleLine',
+    descKey: 'wizard.seriesMode.option.dualAxisDoubleLineDesc',
+  },
 ];
 
 const scalarPositionPreviewClassMap: Record<ScalarContentPosition, string> = {
@@ -230,6 +256,7 @@ const createFormFromCard = (card: Card): WizardForm => {
     seriesKey: card.mapping_config.series?.series_key ?? 'series',
     seriesNameKey: card.mapping_config.series?.series_name_key ?? 'name',
     seriesValuesKey: card.mapping_config.series?.series_values_key ?? 'values',
+    seriesMode: normalizeSeriesMode(card.ui_config.series_mode, SERIES_MODE_DEFAULT),
     statusLabelKey: card.mapping_config.status?.label_key ?? 'label',
     statusStateKey: card.mapping_config.status?.state_key ?? 'state',
     statusMessageKey: card.mapping_config.status?.message_key ?? 'message',
@@ -328,6 +355,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
     form.seriesKey,
     form.seriesNameKey,
     form.seriesValuesKey,
+    form.seriesMode,
     form.statusLabelKey,
     form.statusStateKey,
     form.statusMessageKey,
@@ -680,6 +708,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
           ...editingCard.ui_config,
           size: form.size,
           color_theme: form.colorTheme,
+          series_mode: form.seriesMode,
           scalar_position: form.scalarPosition,
           scalar_text_size: form.scalarTextSize,
           status_vertical_position: form.statusVerticalPosition,
@@ -730,6 +759,7 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
         size: form.size,
         x: 0,
         y: 0,
+        series_mode: form.seriesMode,
         scalar_position: form.scalarPosition,
         scalar_text_size: form.scalarTextSize,
         status_vertical_position: form.statusVerticalPosition,
@@ -784,6 +814,12 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
   const goBack = () => {
     clearValidationError();
     setStep((prev) => Math.max(1, prev - 1));
+  };
+
+  const getSeriesModeLabel = (mode: SeriesMode) => {
+    if (mode === 'single_axis_double_line') return tr('wizard.seriesMode.option.singleAxisDoubleLine');
+    if (mode === 'dual_axis_double_line') return tr('wizard.seriesMode.option.dualAxisDoubleLine');
+    return tr('wizard.seriesMode.option.singleAxisSingleLine');
   };
 
   const renderStepOne = () => (
@@ -926,6 +962,33 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
           </div>
         </div>
       </div>
+
+      {form.type === 'series' && (
+        <div className="rounded-lg border border-border/70 bg-secondary/20 p-4 space-y-3">
+          <p className="text-sm font-medium">{tr('wizard.seriesMode')}</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+            {seriesModeOptions.map((option) => {
+              const selected = form.seriesMode === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => updateForm('seriesMode', option.value)}
+                  className={`rounded-md border p-3 text-left transition-colors ${
+                    selected
+                      ? 'border-primary bg-secondary text-primary'
+                      : 'border-input bg-secondary/40 hover:bg-secondary/70'
+                  }`}
+                >
+                  <p className="text-sm font-medium">{tr(option.labelKey)}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{tr(option.descKey)}</p>
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-xs text-muted-foreground">{tr('wizard.seriesModeHint')}</p>
+        </div>
+      )}
 
       {form.type === 'scalar' && (
         <div className="rounded-lg border border-border/70 bg-secondary/20 p-4 space-y-4">
@@ -1488,15 +1551,23 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
 
     if (form.type === 'series') {
       const payload = testResult.payload as any;
+      const mode = normalizeSeriesMode(form.seriesMode, SERIES_MODE_DEFAULT);
+      const fallbackToSingleLine = shouldFallbackToSingleLine(mode, payload);
       return (
         <div className="w-full border border-blue-500/30 bg-blue-500/10 rounded-lg p-4 space-y-2">
           <p className="text-xs uppercase text-blue-300">{tr('wizard.seriesPreview')}</p>
+          <p className="text-sm text-muted-foreground">
+            {tr('wizard.seriesModePreview', { mode: getSeriesModeLabel(mode) })}
+          </p>
           <p className="text-sm text-muted-foreground">
             {tr('wizard.points', { count: payload?.x_axis?.length ?? 0 })}
           </p>
           <p className="text-sm text-muted-foreground">
             {tr('wizard.seriesCount', { count: payload?.series?.length ?? 0 })}
           </p>
+          {fallbackToSingleLine && (
+            <p className="text-sm text-amber-300">{tr('wizard.seriesFallbackToSingleLine')}</p>
+          )}
         </div>
       );
     }

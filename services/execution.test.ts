@@ -50,6 +50,31 @@ describe('execution contract normalize', () => {
     });
   });
 
+  it('keeps multiple series entries when names are duplicated', () => {
+    const payload = __testables.normalizePayload(
+      {
+        type: 'series',
+        data: {
+          x_axis: ['A', 'B'],
+          series: [
+            { name: 'dup', values: [1, 2] },
+            { name: 'dup', values: [3, 4] },
+          ],
+        },
+      },
+      'series',
+      {},
+    );
+
+    expect(payload).toEqual({
+      x_axis: ['A', 'B'],
+      series: [
+        { name: 'dup', values: [1, 2] },
+        { name: 'dup', values: [3, 4] },
+      ],
+    });
+  });
+
   it('normalizes status state aliases', () => {
     const payload = __testables.normalizePayload(
       {

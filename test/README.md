@@ -10,6 +10,13 @@ These scripts are for manual validation in Tauri mode (`npm run tauri:dev`).
 - `series_ok.py`
   - Card type: `series`
   - Expected: chart renders x-axis + one or more lines
+  - Note: double-line modes always consume the first two series; if only one series is returned, UI falls back to single-line
+- `series_single_axis_double_line_ok.py`
+  - Card type: `series` (set mode to `single_axis_double_line`)
+  - Expected: chart renders two lines on one left Y axis (ranges are close)
+- `series_dual_axis_double_line_ok.py`
+  - Card type: `series` (set mode to `dual_axis_double_line`)
+  - Expected: chart renders two lines with left/right Y axes (ranges differ a lot)
 - `status_ok.py`
   - Card type: `status`
   - Expected: status card renders label/state/message
@@ -45,6 +52,8 @@ These scripts are for manual validation in Tauri mode (`npm run tauri:dev`).
 
 - `scalar_ok.py --value 78.9 --unit "%" --trend down --color warning --jitter 2 --seed 42`
 - `series_ok.py --points 24 --step 0.5 --series-names cpu,mem,disk`
+- `series_single_axis_double_line_ok.py --points 24 --step 0.5`
+- `series_dual_axis_double_line_ok.py --points 24 --step 0.5`
 - `status_ok.py --label redis --state critical --message "replication lag high"`
 - `gauge_ok.py --min 0 --max 100 --value 80 --unit "%" --jitter 2 --seed 7`
 - `timeout_sleep.py --sleep 20`

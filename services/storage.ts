@@ -26,6 +26,8 @@ import {
   TextSizePreset,
   VerticalContentPosition,
   SCALAR_CONTENT_POSITIONS,
+  SERIES_MODES,
+  SeriesMode,
   TEXT_SIZE_PRESETS,
   VERTICAL_CONTENT_POSITIONS,
 } from '../types';
@@ -40,13 +42,14 @@ import {
   normalizeExecutionHistoryBuffer,
   withExecutionHistoryCapacity,
 } from './diagnostics';
+import { inferSeriesModeFromPayload } from './series-chart';
 
 const POINTER_FILENAME = 'storage_config.json';
 const DATA_FILENAME = 'user_settings.json';
 const DEFAULT_SUBDIR = 'data';
 const DEFAULT_BACKUP_SUBDIR = 'backups';
 const BACKUP_FILENAME_PREFIX = 'backup';
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 const RESERVED_ALL_GROUP = 'All';
 const DEFAULT_GROUP_NAME = 'Default';
 const GROUP_ID_PATTERN = /^G(\d+)$/i;
@@ -104,11 +107,16 @@ const normalizeTextSizePreset = (value: unknown): TextSizePreset => {
   const raw = String(value ?? '').trim();
   return TEXT_SIZE_PRESETS.includes(raw as TextSizePreset) ? (raw as TextSizePreset) : 'medium';
 };
+const normalizeSeriesMode = (value: unknown): SeriesMode | undefined => {
+  const raw = String(value ?? '').trim();
+  return SERIES_MODES.includes(raw as SeriesMode) ? (raw as SeriesMode) : undefined;
+};
 const normalizeUIConfig = (rawUIConfig: any): Card['ui_config'] => ({
   color_theme: rawUIConfig?.color_theme ?? 'default',
   size: rawUIConfig?.size ?? '1x1',
   x: Number(rawUIConfig?.x ?? 0),
   y: Number(rawUIConfig?.y ?? 0),
+  series_mode: normalizeSeriesMode(rawUIConfig?.series_mode),
   scalar_position: normalizeScalarContentPosition(rawUIConfig?.scalar_position),
   scalar_text_size: normalizeTextSizePreset(rawUIConfig?.scalar_text_size),
   status_vertical_position: normalizeVerticalContentPosition(rawUIConfig?.status_vertical_position),
@@ -644,8 +652,16 @@ const normalizeCard = (rawCard: any, index: number, historyLimit: number): Card 
       : 'scalar';
 
   const mapping = normalizeMapping(rawCard?.mapping_config, cardType);
+  const normalizedUIConfig = normalizeUIConfig(rawCard?.ui_config);
 
   const cacheFromLegacy = deriveCacheFromLegacyRuntime(rawCard?.runtimeData);
+  const cacheData = rawCard?.cache_data ?? cacheFromLegacy;
+  const inferredSeriesMode =
+    cardType === 'series' && !normalizedUIConfig.series_mode
+      ? inferSeriesModeFromPayload(
+          cacheData?.last_success_payload ?? rawCard?.runtimeData?.payload,
+        )
+      : normalizedUIConfig.series_mode;
   const executionHistory = withExecutionHistoryCapacity(
     normalizeExecutionHistoryBuffer(rawCard?.execution_history, historyLimit),
     historyLimit,
@@ -671,7 +687,13 @@ const normalizeCard = (rawCard: any, index: number, historyLimit: number): Card 
       ...defaultRefreshConfig,
       ...(rawCard?.refresh_config ?? {}),
     },
-    ui_config: normalizeUIConfig(rawCard?.ui_config),
+    ui_config:
+      cardType === 'series'
+        ? {
+            ...normalizedUIConfig,
+            series_mode: inferredSeriesMode,
+          }
+        : normalizedUIConfig,
     layout_positions:
       rawCard?.layout_positions && typeof rawCard.layout_positions === 'object'
         ? rawCard.layout_positions
@@ -683,7 +705,7 @@ const normalizeCard = (rawCard: any, index: number, historyLimit: number): Card 
     },
     alert_config: normalizeAlertConfig(rawCard?.alert_config),
     alert_state: normalizeAlertState(rawCard?.alert_state),
-    cache_data: rawCard?.cache_data ?? cacheFromLegacy,
+    cache_data: cacheData,
     execution_history: executionHistory.size > 0 ? executionHistory : undefined,
   };
 
@@ -740,6 +762,11 @@ const sanitizeForSave = (settings: AppSettings): AppSettings => {
   );
   const cards = settings.cards.map((card, index) => {
     const normalizedCard = ensureCardLayoutScopes(card);
+    const normalizedUIConfig = normalizeUIConfig(normalizedCard.ui_config);
+    const inferredSeriesMode =
+      normalizedCard.type === 'series' && !normalizedUIConfig.series_mode
+        ? inferSeriesModeFromPayload(normalizedCard.cache_data?.last_success_payload)
+        : normalizedUIConfig.series_mode;
     const executionHistory = withExecutionHistoryCapacity(
       normalizeExecutionHistoryBuffer(normalizedCard.execution_history, execution_history_limit),
       execution_history_limit,
@@ -756,7 +783,13 @@ const sanitizeForSave = (settings: AppSettings): AppSettings => {
         ...defaultRefreshConfig,
         ...normalizedCard.refresh_config,
       },
-      ui_config: normalizeUIConfig(normalizedCard.ui_config),
+      ui_config:
+        normalizedCard.type === 'series'
+          ? {
+              ...normalizedUIConfig,
+              series_mode: inferredSeriesMode,
+            }
+          : normalizedUIConfig,
       alert_config: normalizeAlertConfig(normalizedCard.alert_config),
       alert_state: normalizeAlertState(normalizedCard.alert_state),
       execution_history: executionHistory.size > 0 ? executionHistory : undefined,

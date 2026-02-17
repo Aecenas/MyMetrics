@@ -61,7 +61,7 @@ describe('storage migration', () => {
 
     const migrated = storageMigration.migrateToLatest(legacy);
 
-    expect(migrated.schema_version).toBe(6);
+    expect(migrated.schema_version).toBe(7);
     expect(migrated.language).toBe('zh-CN');
     expect(migrated.dashboard_columns).toBe(4);
     expect(migrated.adaptive_window_enabled).toBe(true);
@@ -146,6 +146,139 @@ describe('storage migration', () => {
       value_key: 'value',
       unit_key: 'unit',
     });
+  });
+
+  it('infers single-axis double-line mode for legacy series cards with close ranges', () => {
+    const migrated = storageMigration.migrateToLatest({
+      schema_version: 6,
+      cards: [
+        {
+          id: 'series-1',
+          title: 'Traffic',
+          group: 'Infra',
+          type: 'series',
+          script_config: {
+            path: '/tmp/series.py',
+            args: [],
+          },
+          cache_data: {
+            last_success_payload: {
+              x_axis: [1, 2, 3],
+              series: [
+                { name: 'req', values: [10, 18, 24] },
+                { name: 'latency', values: [3, 6, 9] },
+              ],
+            },
+          },
+        },
+      ],
+    });
+
+    expect(migrated.cards[0].ui_config.series_mode).toBe('single_axis_double_line');
+  });
+
+  it('infers dual-axis double-line mode for legacy series cards with large range ratio', () => {
+    const migrated = storageMigration.migrateToLatest({
+      schema_version: 6,
+      cards: [
+        {
+          id: 'series-1',
+          title: 'Cost',
+          group: 'Finance',
+          type: 'series',
+          script_config: {
+            path: '/tmp/series.py',
+            args: [],
+          },
+          cache_data: {
+            last_success_payload: {
+              x_axis: [1, 2, 3],
+              series: [
+                { name: 'count', values: [5, 7, 11] },
+                { name: 'amount', values: [20, 90, 260] },
+              ],
+            },
+          },
+        },
+      ],
+    });
+
+    expect(migrated.cards[0].ui_config.series_mode).toBe('dual_axis_double_line');
+  });
+
+  it('falls back to single-axis single-line mode when series payload is missing or insufficient', () => {
+    const missingPayload = storageMigration.migrateToLatest({
+      schema_version: 6,
+      cards: [
+        {
+          id: 'series-1',
+          title: 'A',
+          group: 'Infra',
+          type: 'series',
+          script_config: {
+            path: '/tmp/series.py',
+            args: [],
+          },
+        },
+      ],
+    });
+
+    const oneLinePayload = storageMigration.migrateToLatest({
+      schema_version: 6,
+      cards: [
+        {
+          id: 'series-2',
+          title: 'B',
+          group: 'Infra',
+          type: 'series',
+          script_config: {
+            path: '/tmp/series.py',
+            args: [],
+          },
+          cache_data: {
+            last_success_payload: {
+              x_axis: [1, 2],
+              series: [{ name: 'cpu', values: [10, 12] }],
+            },
+          },
+        },
+      ],
+    });
+
+    expect(missingPayload.cards[0].ui_config.series_mode).toBe('single_axis_single_line');
+    expect(oneLinePayload.cards[0].ui_config.series_mode).toBe('single_axis_single_line');
+  });
+
+  it('keeps an explicitly configured series mode', () => {
+    const migrated = storageMigration.migrateToLatest({
+      schema_version: 7,
+      cards: [
+        {
+          id: 'series-1',
+          title: 'Explicit',
+          group: 'Infra',
+          type: 'series',
+          script_config: {
+            path: '/tmp/series.py',
+            args: [],
+          },
+          ui_config: {
+            series_mode: 'single_axis_double_line',
+          },
+          cache_data: {
+            last_success_payload: {
+              x_axis: [1, 2, 3],
+              series: [
+                { name: 'small', values: [1, 2, 3] },
+                { name: 'large', values: [100, 200, 300] },
+              ],
+            },
+          },
+        },
+      ],
+    });
+
+    expect(migrated.cards[0].ui_config.series_mode).toBe('single_axis_double_line');
   });
 
   it('keeps explicit group list and appends card-derived groups', () => {
