@@ -1066,7 +1066,7 @@ export const Settings = () => {
                       data-sound="toggle.change"
                       className={`p-2 rounded-md text-sm transition-all ${
                         desktopNotificationsEnabled
-                          ? 'bg-background text-foreground shadow-sm'
+                          ? 'bg-emerald-600 text-white shadow-sm hover:bg-emerald-600'
                           : 'text-muted-foreground hover:text-foreground'
                       }`}
                     >
