@@ -89,6 +89,8 @@ export const Settings = () => {
     setDashboardColumns,
     adaptiveWindowEnabled,
     setAdaptiveWindowEnabled,
+    desktopNotificationsEnabled,
+    setDesktopNotificationsEnabled,
     dataPath,
     updateDataPath,
     backupDirectory,
@@ -170,6 +172,11 @@ export const Settings = () => {
     void refreshNotificationPermission();
   }, []);
 
+  useEffect(() => {
+    if (desktopNotificationsEnabled) return;
+    setNotificationHint('');
+  }, [desktopNotificationsEnabled]);
+
   const handleRequestNotificationPermission = async () => {
     setIsUpdatingNotificationPermission(true);
     setNotificationHint('');
@@ -187,6 +194,7 @@ export const Settings = () => {
   };
 
   const handleSendTestNotification = async () => {
+    if (!desktopNotificationsEnabled) return;
     setIsSendingTestNotification(true);
     setNotificationHint('');
     try {
@@ -1046,37 +1054,74 @@ export const Settings = () => {
             <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
               <h3 className="text-lg font-medium mb-4">{tr('settings.notifications')}</h3>
               <div className="space-y-4">
-                <div className="space-y-1">
-                  <p className="font-medium">{tr('settings.notificationPermission')}</p>
-                  <p className="text-sm text-muted-foreground">{tr('settings.notificationPermissionDesc')}</p>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <p className="font-medium">{tr('settings.desktopNotificationsEnabled')}</p>
+                    <p className="text-sm text-muted-foreground">{tr('settings.desktopNotificationsEnabledDesc')}</p>
+                  </div>
+                  <div className="flex items-center bg-secondary/50 p-1 rounded-lg border border-border">
+                    <button
+                      type="button"
+                      onClick={() => setDesktopNotificationsEnabled(true)}
+                      data-sound="toggle.change"
+                      className={`p-2 rounded-md text-sm transition-all ${
+                        desktopNotificationsEnabled
+                          ? 'bg-background text-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      {tr('settings.desktopNotificationsOn')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDesktopNotificationsEnabled(false)}
+                      data-sound="toggle.change"
+                      className={`p-2 rounded-md text-sm transition-all ${
+                        !desktopNotificationsEnabled
+                          ? 'bg-background text-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      {tr('settings.desktopNotificationsOff')}
+                    </button>
+                  </div>
                 </div>
 
-                <div className="inline-flex items-center gap-2 rounded-md border border-border/70 px-3 py-2 text-sm">
-                  <span className="text-muted-foreground">{tr('settings.notificationPermissionCurrent')}</span>
-                  <span className="font-medium">{getPermissionLabel(notificationPermission)}</span>
-                </div>
+                {desktopNotificationsEnabled && (
+                  <>
+                    <div className="space-y-1">
+                      <p className="font-medium">{tr('settings.notificationPermission')}</p>
+                      <p className="text-sm text-muted-foreground">{tr('settings.notificationPermissionDesc')}</p>
+                    </div>
 
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    onClick={handleRequestNotificationPermission}
-                    disabled={isUpdatingNotificationPermission}
-                  >
-                    {isUpdatingNotificationPermission
-                      ? tr('settings.requestingNotificationPermission')
-                      : tr('settings.requestNotificationPermission')}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={handleSendTestNotification}
-                    disabled={notificationPermission !== 'granted' || isSendingTestNotification}
-                  >
-                    {isSendingTestNotification
-                      ? tr('settings.sendingTestNotification')
-                      : tr('settings.sendTestNotification')}
-                  </Button>
-                </div>
+                    <div className="inline-flex items-center gap-2 rounded-md border border-border/70 px-3 py-2 text-sm">
+                      <span className="text-muted-foreground">{tr('settings.notificationPermissionCurrent')}</span>
+                      <span className="font-medium">{getPermissionLabel(notificationPermission)}</span>
+                    </div>
 
-                {notificationHint && <p className="text-xs text-muted-foreground">{notificationHint}</p>}
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        onClick={handleRequestNotificationPermission}
+                        disabled={isUpdatingNotificationPermission}
+                      >
+                        {isUpdatingNotificationPermission
+                          ? tr('settings.requestingNotificationPermission')
+                          : tr('settings.requestNotificationPermission')}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={handleSendTestNotification}
+                        disabled={notificationPermission !== 'granted' || isSendingTestNotification}
+                      >
+                        {isSendingTestNotification
+                          ? tr('settings.sendingTestNotification')
+                          : tr('settings.sendTestNotification')}
+                      </Button>
+                    </div>
+
+                    {notificationHint && <p className="text-xs text-muted-foreground">{notificationHint}</p>}
+                  </>
+                )}
               </div>
             </div>
           )}

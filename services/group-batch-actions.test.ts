@@ -12,13 +12,14 @@ const createCard = (
   x: number,
   y: number,
   deleted = false,
+  path = '/tmp/demo.py',
 ): Card => ({
   id,
   title: id,
   group,
   type: 'scalar',
   script_config: {
-    path: '/tmp/demo.py',
+    path,
     args: [],
   },
   mapping_config: {},
@@ -179,6 +180,68 @@ describe('group batch actions', () => {
     expect(state.cards.find((card) => card.id === 'B')?.status.is_deleted).toBe(true);
     expect(state.sectionMarkers.some((section) => section.id === 'sec-1')).toBe(false);
     expect(state.sectionMarkers.some((section) => section.id === 'sec-2')).toBe(true);
+  });
+
+  it('updates script folder for selected cards and keeps only the file name', () => {
+    useStore.setState({
+      cards: [
+        createCard('A', 'Infra', 0, 0, false, '/old/scripts/a.py'),
+        createCard('B', 'Infra', 1, 0, false, '/another/scripts/deep/b.py'),
+      ],
+      sectionMarkers: [createSection('sec-1', 'Infra')],
+    });
+
+    const result = useStore.getState().executeGroupBatchAction({
+      type: 'update_script_path_prefix',
+      sourceGroup: 'Infra',
+      newPathPrefix: '/new/scripts/',
+      cardIds: ['A', 'B'],
+      sectionIds: ['sec-1'],
+    });
+
+    expect(result.successCards).toBe(2);
+    expect(result.successSections).toBe(0);
+    expect(result.failures).toEqual([{ entity: 'section', id: 'sec-1', reason: 'section_operation_unsupported' }]);
+
+    const state = useStore.getState();
+    expect(state.cards.find((card) => card.id === 'A')?.script_config.path).toBe('/new/scripts/a.py');
+    expect(state.cards.find((card) => card.id === 'B')?.script_config.path).toBe('/new/scripts/b.py');
+  });
+
+  it('requires new script folder when running path-prefix batch operation', () => {
+    useStore.setState({
+      cards: [createCard('A', 'Infra', 0, 0, false, '/old/scripts/a.py')],
+    });
+
+    const result = useStore.getState().executeGroupBatchAction({
+      type: 'update_script_path_prefix',
+      sourceGroup: 'Infra',
+      newPathPrefix: '   ',
+      cardIds: ['A'],
+      sectionIds: [],
+    });
+
+    expect(result.successCards).toBe(0);
+    expect(result.failures).toEqual([{ entity: 'request', id: '', reason: 'path_prefix_new_required' }]);
+    expect(useStore.getState().cards.find((card) => card.id === 'A')?.script_config.path).toBe('/old/scripts/a.py');
+  });
+
+  it('skips cards whose script path has no file name', () => {
+    useStore.setState({
+      cards: [createCard('A', 'Infra', 0, 0, false, '/old/scripts/')],
+    });
+
+    const result = useStore.getState().executeGroupBatchAction({
+      type: 'update_script_path_prefix',
+      sourceGroup: 'Infra',
+      newPathPrefix: '/new/scripts',
+      cardIds: ['A'],
+      sectionIds: [],
+    });
+
+    expect(result.successCards).toBe(0);
+    expect(result.failures).toEqual([{ entity: 'card', id: 'A', reason: 'path_filename_missing' }]);
+    expect(useStore.getState().cards.find((card) => card.id === 'A')?.script_config.path).toBe('/old/scripts/');
   });
 
   it('duplicates visible cards to target group and keeps target layout collision-free', () => {

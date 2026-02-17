@@ -4,6 +4,7 @@ import {
   ArrowUp,
   Boxes,
   ClipboardList,
+  FolderOpen,
   FolderPlus,
   Pencil,
   Plus,
@@ -11,13 +12,14 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
+import { open } from '@tauri-apps/plugin-dialog';
 import { GroupBatchResult, useStore } from '../store';
 import { Button } from './ui/Button';
 import { t } from '../i18n';
 import { interactionSoundService } from '../services/interaction-sound';
 
 type CenterSectionId = 'create' | 'manage' | 'batch';
-type BatchOperationType = 'move_group' | 'update_interval' | 'soft_delete';
+type BatchOperationType = 'move_group' | 'update_interval' | 'update_script_path_prefix' | 'soft_delete';
 
 interface CenterSectionMeta {
   id: CenterSectionId;
@@ -89,6 +91,7 @@ export const GroupManagementCenter: React.FC = () => {
   const [batchOperation, setBatchOperation] = useState<BatchOperationType>('move_group');
   const [batchTargetGroup, setBatchTargetGroup] = useState('');
   const [batchIntervalInput, setBatchIntervalInput] = useState('300');
+  const [batchNewPathPrefix, setBatchNewPathPrefix] = useState('');
   const [selectedCardIds, setSelectedCardIds] = useState<string[]>([]);
   const [selectedSectionIds, setSelectedSectionIds] = useState<string[]>([]);
   const [batchResult, setBatchResult] = useState<GroupBatchResult | null>(null);
@@ -247,6 +250,23 @@ export const GroupManagementCenter: React.FC = () => {
     setter([...ids, id]);
   };
 
+  const handleBrowseBatchPathPrefix = async () => {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: tr('groups.batch.selectScriptFolder'),
+      });
+
+      const selectedPath = Array.isArray(selected) ? selected[0] : selected;
+      if (selectedPath) {
+        setBatchNewPathPrefix(selectedPath);
+      }
+    } catch (error) {
+      console.error('Failed to open script folder dialog', error);
+    }
+  };
+
   const handleSubmitBatch = () => {
     if (!batchGroup) return;
 
@@ -275,6 +295,25 @@ export const GroupManagementCenter: React.FC = () => {
         type: 'update_interval',
         sourceGroup: batchGroup,
         intervalSec,
+        cardIds: selectedCardIds,
+        sectionIds: selectedSectionIds,
+      });
+      setBatchResult(result);
+      setSelectedCardIds([]);
+      setSelectedSectionIds([]);
+      if (result.failures.length > 0) {
+        interactionSoundService.play('action.error');
+      } else if (result.successCards + result.successSections > 0) {
+        interactionSoundService.play('action.success');
+      }
+      return;
+    }
+
+    if (batchOperation === 'update_script_path_prefix') {
+      const result = executeGroupBatchAction({
+        type: 'update_script_path_prefix',
+        sourceGroup: batchGroup,
+        newPathPrefix: batchNewPathPrefix,
         cardIds: selectedCardIds,
         sectionIds: selectedSectionIds,
       });
@@ -530,7 +569,7 @@ export const GroupManagementCenter: React.FC = () => {
                 <div className="space-y-2">
                   <label className="text-sm font-medium">{tr('groups.batch.operation')}</label>
                   <div className="flex flex-wrap gap-2">
-                    {(['move_group', 'update_interval', 'soft_delete'] as BatchOperationType[]).map((type) => (
+                    {(['move_group', 'update_interval', 'update_script_path_prefix', 'soft_delete'] as BatchOperationType[]).map((type) => (
                       <button
                         key={type}
                         type="button"
@@ -654,6 +693,26 @@ export const GroupManagementCenter: React.FC = () => {
 
               {batchOperation === 'soft_delete' && (
                 <p className="text-sm text-muted-foreground">{tr('groups.batch.softDeleteHint')}</p>
+              )}
+
+              {batchOperation === 'update_script_path_prefix' && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">{tr('groups.batch.pathPrefixNew')}</label>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="text"
+                      value={batchNewPathPrefix}
+                      onChange={(event) => setBatchNewPathPrefix(event.target.value)}
+                      className="w-full sm:flex-1 bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                      placeholder={tr('groups.batch.pathPrefixNewPlaceholder')}
+                    />
+                    <Button variant="secondary" type="button" data-sound="none" onClick={() => void handleBrowseBatchPathPrefix()}>
+                      <FolderOpen size={14} className="mr-2" />
+                      {tr('wizard.browse')}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{tr('groups.batch.pathPrefixHint')}</p>
+                </div>
               )}
 
               <div className="flex items-center justify-end">

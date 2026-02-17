@@ -52,6 +52,7 @@ const createSettings = (cards: Card[]): AppSettings => ({
   language: 'zh-CN',
   dashboard_columns: 4,
   adaptive_window_enabled: true,
+  desktop_notifications_enabled: true,
   refresh_concurrency_limit: 4,
   execution_history_limit: 120,
   backup_config: {

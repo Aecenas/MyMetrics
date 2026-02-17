@@ -242,6 +242,7 @@ export interface AppSettings {
   language: AppLanguage;
   dashboard_columns: number;
   adaptive_window_enabled: boolean;
+  desktop_notifications_enabled: boolean;
   refresh_concurrency_limit: number;
   execution_history_limit: number;
   backup_config: BackupConfig;

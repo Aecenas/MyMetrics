@@ -70,7 +70,12 @@ type GroupMutationResult = { ok: true } | { ok: false; error: GroupMutationError
 type DuplicateCardError = 'not_found' | 'deleted' | 'empty_title' | 'invalid_group';
 type DuplicateCardResult = { ok: true; newCardId: string } | { ok: false; error: DuplicateCardError };
 
-export type GroupBatchOperationType = 'move_group' | 'update_interval' | 'soft_delete' | 'copy_cards';
+export type GroupBatchOperationType =
+  | 'move_group'
+  | 'update_interval'
+  | 'update_script_path_prefix'
+  | 'soft_delete'
+  | 'copy_cards';
 
 export type GroupBatchFailureReason =
   | 'source_group_not_found'
@@ -78,6 +83,8 @@ export type GroupBatchFailureReason =
   | 'target_group_invalid'
   | 'target_group_same'
   | 'interval_invalid'
+  | 'path_prefix_new_required'
+  | 'path_filename_missing'
   | 'no_targets'
   | 'card_not_found'
   | 'card_not_in_group'
@@ -113,6 +120,13 @@ export type GroupBatchActionRequest =
       type: 'update_interval';
       sourceGroup: string;
       intervalSec: number;
+      cardIds: string[];
+      sectionIds: string[];
+    }
+  | {
+      type: 'update_script_path_prefix';
+      sourceGroup: string;
+      newPathPrefix: string;
       cardIds: string[];
       sectionIds: string[];
     }
@@ -180,6 +194,27 @@ const uniqueIds = (ids: string[]): string[] => {
     result.push(id);
   });
   return result;
+};
+
+const extractScriptFileName = (rawPath: string): string | undefined => {
+  const trimmed = String(rawPath ?? '').trim();
+  if (!trimmed) return undefined;
+  const withoutTrailingSlash = trimmed.replace(/[\\/]+$/, '');
+  if (!withoutTrailingSlash) return undefined;
+  const parts = withoutTrailingSlash.split(/[\\/]/);
+  const fileName = parts[parts.length - 1]?.trim();
+  if (!fileName) return undefined;
+  return fileName.toLowerCase().endsWith('.py') ? fileName : undefined;
+};
+
+const joinPrefixWithFileName = (rawPrefix: string, fileName: string): string => {
+  const prefix = String(rawPrefix ?? '').trim();
+  if (!prefix) return fileName;
+  if (/[\\/]$/.test(prefix)) {
+    return `${prefix}${fileName}`;
+  }
+  const separator = prefix.includes('\\') && !prefix.includes('/') ? '\\' : '/';
+  return `${prefix}${separator}${fileName}`;
 };
 
 const normalizeGroupId = (value: unknown): string | undefined => {
@@ -919,6 +954,7 @@ interface NormalizedSettingsForStore {
   sectionMarkers: SectionMarker[];
   groups: GroupEntity[];
   activeGroup: string;
+  desktopNotificationsEnabled: boolean;
   backupConfig: BackupConfig;
   interactionSoundConfig: InteractionSoundConfig;
 }
@@ -949,6 +985,7 @@ const normalizeSettingsForStore = (settings: AppSettings): NormalizedSettingsFor
     sectionMarkers: normalizedSections,
     groups,
     activeGroup,
+    desktopNotificationsEnabled: settings.desktop_notifications_enabled !== false,
     backupConfig: storageMigration.normalizeBackupConfig(settings.backup_config ?? DEFAULT_BACKUP_CONFIG),
     interactionSoundConfig: normalizeInteractionSoundConfig(settings.interaction_sound),
   };
@@ -965,6 +1002,7 @@ interface AppState {
   language: AppLanguage;
   dashboardColumns: number;
   adaptiveWindowEnabled: boolean;
+  desktopNotificationsEnabled: boolean;
   cards: Card[];
   sectionMarkers: SectionMarker[];
   groups: GroupEntity[];
@@ -983,6 +1021,7 @@ interface AppState {
   setLanguage: (language: AppLanguage) => void;
   setDashboardColumns: (columns: number) => void;
   setAdaptiveWindowEnabled: (enabled: boolean) => void;
+  setDesktopNotificationsEnabled: (enabled: boolean) => void;
   setView: (view: ViewMode) => void;
   toggleSidebar: () => void;
   setActiveGroup: (group: string) => void;
@@ -1040,6 +1079,7 @@ export const buildSettingsPayload = (state: Pick<
   | 'language'
   | 'dashboardColumns'
   | 'adaptiveWindowEnabled'
+  | 'desktopNotificationsEnabled'
   | 'refreshConcurrencyLimit'
   | 'executionHistoryLimit'
   | 'backupDirectory'
@@ -1059,6 +1099,7 @@ export const buildSettingsPayload = (state: Pick<
   language: state.language,
   dashboard_columns: state.dashboardColumns,
   adaptive_window_enabled: state.adaptiveWindowEnabled,
+  desktop_notifications_enabled: state.desktopNotificationsEnabled,
   refresh_concurrency_limit: state.refreshConcurrencyLimit,
   execution_history_limit: state.executionHistoryLimit,
   backup_config: storageMigration.normalizeBackupConfig({
@@ -1087,6 +1128,7 @@ export const useStore = create<AppState>((set, get) => ({
   language: 'zh-CN',
   dashboardColumns: DEFAULT_DASHBOARD_COLUMNS,
   adaptiveWindowEnabled: true,
+  desktopNotificationsEnabled: true,
   isEditMode: false,
   isInitialized: false,
   cards: [],
@@ -1123,6 +1165,7 @@ export const useStore = create<AppState>((set, get) => ({
       };
     }),
   setAdaptiveWindowEnabled: (enabled) => set({ adaptiveWindowEnabled: Boolean(enabled) }),
+  setDesktopNotificationsEnabled: (enabled) => set({ desktopNotificationsEnabled: Boolean(enabled) }),
   setView: (view) => set({ currentView: view }),
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
   setActiveGroup: (group) =>
@@ -1256,6 +1299,7 @@ export const useStore = create<AppState>((set, get) => ({
         language: persisted.language,
         dashboardColumns: normalized.dashboardColumns,
         adaptiveWindowEnabled: persisted.adaptive_window_enabled,
+        desktopNotificationsEnabled: normalized.desktopNotificationsEnabled,
         refreshConcurrencyLimit: clampRefreshConcurrency(persisted.refresh_concurrency_limit),
         executionHistoryLimit: clampExecutionHistoryLimit(persisted.execution_history_limit),
         cards: normalized.cards,
@@ -1276,6 +1320,7 @@ export const useStore = create<AppState>((set, get) => ({
       if (
         normalized.cards.length !== persisted.cards.length ||
         persisted.dashboard_columns !== normalized.dashboardColumns ||
+        persisted.desktop_notifications_enabled !== normalized.desktopNotificationsEnabled ||
         persisted.backup_config?.retention_count !== normalized.backupConfig.retention_count ||
         persisted.backup_config?.auto_backup_enabled !== normalized.backupConfig.auto_backup_enabled ||
         JSON.stringify(persisted.backup_config?.schedule) !== JSON.stringify(normalized.backupConfig.schedule) ||
@@ -1289,6 +1334,7 @@ export const useStore = create<AppState>((set, get) => ({
         await storageService.save({
           ...persisted,
           dashboard_columns: normalized.dashboardColumns,
+          desktop_notifications_enabled: normalized.desktopNotificationsEnabled,
           activeGroup: normalized.activeGroup,
           groups: normalized.groups,
           cards: normalized.cards,
@@ -1332,6 +1378,7 @@ export const useStore = create<AppState>((set, get) => ({
       ...settings,
       schema_version: STORAGE_SCHEMA_VERSION,
       dashboard_columns: normalized.dashboardColumns,
+      desktop_notifications_enabled: normalized.desktopNotificationsEnabled,
       activeGroup: normalized.activeGroup,
       groups: normalized.groups,
       cards: normalized.cards,
@@ -1345,6 +1392,7 @@ export const useStore = create<AppState>((set, get) => ({
       language: settings.language,
       dashboardColumns: normalized.dashboardColumns,
       adaptiveWindowEnabled: settings.adaptive_window_enabled,
+      desktopNotificationsEnabled: normalized.desktopNotificationsEnabled,
       refreshConcurrencyLimit: clampRefreshConcurrency(settings.refresh_concurrency_limit),
       executionHistoryLimit: clampExecutionHistoryLimit(settings.execution_history_limit),
       cards: normalized.cards,
@@ -1726,6 +1774,46 @@ export const useStore = create<AppState>((set, get) => ({
             },
           };
         });
+
+        return { cards: normalizeCardBusinessIds(cards, state.groups) };
+      }
+
+      if (request.type === 'update_script_path_prefix') {
+        const newPathPrefix = String(request.newPathPrefix ?? '').trim();
+        if (!newPathPrefix) {
+          report.failures.push({ entity: 'request', id: '', reason: 'path_prefix_new_required' });
+          return {};
+        }
+
+        validSectionIds.forEach((sectionId) => {
+          report.failures.push({ entity: 'section', id: sectionId, reason: 'section_operation_unsupported' });
+        });
+
+        if (validCardIds.size === 0) {
+          return {};
+        }
+
+        const cards = state.cards.map((card) => {
+          if (!validCardIds.has(card.id)) return card;
+          const currentPath = String(card.script_config.path ?? '');
+          const fileName = extractScriptFileName(currentPath);
+          if (!fileName) {
+            report.failures.push({ entity: 'card', id: card.id, reason: 'path_filename_missing' });
+            return card;
+          }
+          report.successCards += 1;
+          return {
+            ...card,
+            script_config: {
+              ...card.script_config,
+              path: joinPrefixWithFileName(newPathPrefix, fileName),
+            },
+          };
+        });
+
+        if (report.successCards === 0) {
+          return {};
+        }
 
         return { cards: normalizeCardBusinessIds(cards, state.groups) };
       }
@@ -2349,8 +2437,10 @@ export const useStore = create<AppState>((set, get) => ({
             }),
           }));
 
-          for (const notification of pendingNotifications) {
-            await notificationService.sendDesktopNotification(notification.title, notification.body);
+          if (get().desktopNotificationsEnabled) {
+            for (const notification of pendingNotifications) {
+              await notificationService.sendDesktopNotification(notification.title, notification.body);
+            }
           }
         },
         () => get().refreshConcurrencyLimit,

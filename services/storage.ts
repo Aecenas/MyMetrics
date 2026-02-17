@@ -82,6 +82,7 @@ const tr = (key: string, params?: Record<string, string | number>) => t(getLangu
 
 const normalizeLanguage = (value: unknown): AppLanguage => (value === 'en-US' ? 'en-US' : 'zh-CN');
 const normalizeAdaptiveWindowEnabled = (value: unknown): boolean => value !== false;
+const normalizeDesktopNotificationsEnabled = (value: unknown): boolean => value !== false;
 const isAllGroupName = (name: string): boolean => name.trim().toLowerCase() === RESERVED_ALL_GROUP.toLowerCase();
 const normalizeGroupName = (value: unknown): string => {
   const trimmed = String(value ?? '').trim();
@@ -708,6 +709,7 @@ const migrateToLatest = (input: any): AppSettings => {
     language: normalizeLanguage(input?.language),
     dashboard_columns,
     adaptive_window_enabled: normalizeAdaptiveWindowEnabled(input?.adaptive_window_enabled),
+    desktop_notifications_enabled: normalizeDesktopNotificationsEnabled(input?.desktop_notifications_enabled),
     refresh_concurrency_limit: clampRefreshConcurrency(input?.refresh_concurrency_limit),
     execution_history_limit,
     backup_config: normalizeBackupConfig(
@@ -780,6 +782,9 @@ const sanitizeForSave = (settings: AppSettings): AppSettings => {
     language: normalizeLanguage((settings as Partial<AppSettings>).language),
     dashboard_columns,
     adaptive_window_enabled: normalizeAdaptiveWindowEnabled((settings as Partial<AppSettings>).adaptive_window_enabled),
+    desktop_notifications_enabled: normalizeDesktopNotificationsEnabled(
+      (settings as Partial<AppSettings>).desktop_notifications_enabled,
+    ),
     refresh_concurrency_limit,
     execution_history_limit,
     backup_config: normalizeBackupConfig((settings as Partial<AppSettings>).backup_config),

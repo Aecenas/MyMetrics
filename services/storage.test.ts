@@ -65,6 +65,7 @@ describe('storage migration', () => {
     expect(migrated.language).toBe('zh-CN');
     expect(migrated.dashboard_columns).toBe(4);
     expect(migrated.adaptive_window_enabled).toBe(true);
+    expect(migrated.desktop_notifications_enabled).toBe(true);
     expect(migrated.refresh_concurrency_limit).toBe(4);
     expect(migrated.execution_history_limit).toBe(120);
     expect(migrated.activeGroup).toBe('Infra');
