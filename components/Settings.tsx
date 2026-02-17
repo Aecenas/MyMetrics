@@ -229,12 +229,16 @@ export const Settings = () => {
         await updateDataPath(selectedPath);
       }
     } catch (error) {
-      console.error('Failed to open dialog', error);
+      console.error('Failed to change data folder', error);
     }
   };
 
   const handleResetDefault = async () => {
-    await updateDataPath(null);
+    try {
+      await updateDataPath(null);
+    } catch (error) {
+      console.error('Failed to reset data folder', error);
+    }
   };
 
   const savePythonPath = () => {

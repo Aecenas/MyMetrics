@@ -945,16 +945,12 @@ export const storageService = {
     const current = await resolveDataPath();
 
     let currentData: string | null = null;
-    try {
-      if (current.baseDir) {
-        if (await exists(current.path, { baseDir: current.baseDir })) {
-          currentData = await readTextFile(current.path, { baseDir: current.baseDir });
-        }
-      } else {
-        currentData = await readTextFile(current.path);
+    if (current.baseDir) {
+      if (await exists(current.path, { baseDir: current.baseDir })) {
+        currentData = await readTextFile(current.path, { baseDir: current.baseDir });
       }
-    } catch (error) {
-      console.warn('Unable to read existing data while migrating storage path', error);
+    } else if (await exists(current.path)) {
+      currentData = await readTextFile(current.path);
     }
 
     if (newFolder) {

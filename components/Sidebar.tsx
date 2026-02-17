@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { t } from '../i18n';
 import { ViewMode } from '../types';
+import { APP_VERSION_LABEL } from '../version';
 
 interface SidebarProps {
   mobileOpen: boolean;
@@ -96,26 +97,42 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, onMobileOpenChange
           })}
         </nav>
 
-        {/* Collapse Toggle */}
-        <div className="p-4 border-t border-border flex justify-end">
-          <button
-            onClick={() => onMobileOpenChange(false)}
-            data-sound="toggle.change"
-            aria-label={tr('sidebar.closeNavigation')}
-            title={tr('sidebar.closeNavigation')}
-            className="p-1.5 rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors lg:hidden"
-          >
-            <X size={18} />
-          </button>
-          <button
-            onClick={toggleSidebar}
-            data-sound="toggle.change"
-            aria-label={sidebarOpen ? tr('sidebar.collapseNavigation') : tr('sidebar.expandNavigation')}
-            title={sidebarOpen ? tr('sidebar.collapseNavigation') : tr('sidebar.expandNavigation')}
-            className="hidden p-1.5 rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors lg:inline-flex"
-          >
-            {sidebarOpen ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
-          </button>
+        {/* Footer */}
+        <div className="border-t border-border p-3">
+          <div className={`flex ${expanded ? 'items-center justify-between' : 'flex-col items-center gap-2'}`}>
+            <div
+              className={`
+                inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-secondary/40
+                px-2.5 py-1 text-[11px] text-muted-foreground
+                ${expanded ? '' : 'px-2'}
+              `}
+              title={`Version ${APP_VERSION_LABEL}`}
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500/85" />
+              {expanded && <span className="font-mono tracking-tight">{APP_VERSION_LABEL}</span>}
+            </div>
+
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => onMobileOpenChange(false)}
+                data-sound="toggle.change"
+                aria-label={tr('sidebar.closeNavigation')}
+                title={tr('sidebar.closeNavigation')}
+                className="p-1.5 rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors lg:hidden"
+              >
+                <X size={18} />
+              </button>
+              <button
+                onClick={toggleSidebar}
+                data-sound="toggle.change"
+                aria-label={sidebarOpen ? tr('sidebar.collapseNavigation') : tr('sidebar.expandNavigation')}
+                title={sidebarOpen ? tr('sidebar.collapseNavigation') : tr('sidebar.expandNavigation')}
+                className="hidden p-1.5 rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors lg:inline-flex"
+              >
+                {sidebarOpen ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
+              </button>
+            </div>
+          </div>
         </div>
       </aside>
     </>
