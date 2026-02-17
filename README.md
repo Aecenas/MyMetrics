@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src-tauri/icons/icon.png" alt="MyMetrics Logo" width="108" />
+  <img src="src-tauri/icons/icon.png" alt="MyMetrics App Icon" width="108" />
 </p>
 
 <h1 align="center">MyMetrics</h1>

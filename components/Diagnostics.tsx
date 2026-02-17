@@ -1,9 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Activity, BarChart3, ListChecks, type LucideIcon } from 'lucide-react';
 import { useStore } from '../store';
 import { t } from '../i18n';
 import { CardExecutionHistoryEntry } from '../types';
 import { getExecutionHistoryEntries, summarizeExecutionEntries } from '../services/diagnostics';
+import { Button } from './ui/Button';
 
 type StatusFilter = 'all' | 'success' | 'failed' | 'timeout';
 type DiagnosticsSectionId = 'overview' | 'cards' | 'failures';
@@ -42,6 +43,15 @@ const DIAGNOSTICS_SECTIONS: DiagnosticsSectionMeta[] = [
   },
 ];
 
+const MIN_RECENT_PAGE_SIZE = 10;
+const MAX_RECENT_PAGE_SIZE = 50;
+const DEFAULT_RECENT_PAGE_SIZE = 20;
+
+const clampRecentPageSize = (value: number, fallback = DEFAULT_RECENT_PAGE_SIZE): number => {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(MAX_RECENT_PAGE_SIZE, Math.max(MIN_RECENT_PAGE_SIZE, Math.round(value)));
+};
+
 const formatDuration = (value: number | undefined): string => {
   if (value === undefined || !Number.isFinite(value)) return '--';
   return `${Math.round(value)} ms`;
@@ -68,6 +78,9 @@ export const Diagnostics: React.FC = () => {
   const [activeSection, setActiveSection] = useState<DiagnosticsSectionId>('overview');
   const [cardFilter, setCardFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [recentPage, setRecentPage] = useState(1);
+  const [recentPageSize, setRecentPageSize] = useState(DEFAULT_RECENT_PAGE_SIZE);
+  const [recentPageSizeInput, setRecentPageSizeInput] = useState(String(DEFAULT_RECENT_PAGE_SIZE));
 
   const visibleCards = useMemo(() => cards.filter((card) => !card.status.is_deleted), [cards]);
 
@@ -97,6 +110,13 @@ export const Diagnostics: React.FC = () => {
       return true;
     });
   }, [rows, cardFilter, statusFilter]);
+
+  const recentTotalPages = Math.max(1, Math.ceil(filteredRows.length / recentPageSize));
+  const currentRecentPage = Math.min(recentPage, recentTotalPages);
+  const recentStartIndex = (currentRecentPage - 1) * recentPageSize;
+  const pagedRecentRows = filteredRows.slice(recentStartIndex, recentStartIndex + recentPageSize);
+  const recentRangeStart = filteredRows.length === 0 ? 0 : recentStartIndex + 1;
+  const recentRangeEnd = filteredRows.length === 0 ? 0 : recentStartIndex + pagedRecentRows.length;
 
   const statsByCard = useMemo(() => {
     return visibleCards
@@ -148,6 +168,22 @@ export const Diagnostics: React.FC = () => {
       }),
     [language],
   );
+
+  const applyRecentPageSize = (rawValue: string) => {
+    const parsed = Number.parseInt(rawValue.trim(), 10);
+    const normalized = clampRecentPageSize(parsed, recentPageSize);
+    setRecentPageSize(normalized);
+    setRecentPageSizeInput(String(normalized));
+  };
+
+  useEffect(() => {
+    setRecentPage(1);
+  }, [cardFilter, statusFilter, recentPageSize]);
+
+  useEffect(() => {
+    setRecentPage((value) => Math.min(value, recentTotalPages));
+  }, [recentTotalPages]);
+
   const activeSectionMeta =
     DIAGNOSTICS_SECTIONS.find((section) => section.id === activeSection) ?? DIAGNOSTICS_SECTIONS[0];
   const ActiveSectionIcon = activeSectionMeta.icon;
@@ -274,63 +310,119 @@ export const Diagnostics: React.FC = () => {
               </section>
 
               <section className="bg-card border border-border rounded-xl">
-                <div className="px-4 py-3 border-b border-border">
-                  <h3 className="text-lg font-medium">{tr('diagnostics.recent.title')}</h3>
-                  <p className="text-sm text-muted-foreground">{tr('diagnostics.recent.description')}</p>
+                <div className="px-4 py-3 border-b border-border flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <h3 className="text-lg font-medium">{tr('diagnostics.recent.title')}</h3>
+                    <p className="text-sm text-muted-foreground">{tr('diagnostics.recent.description')}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="diagnostics-recent-page-size" className="text-xs text-muted-foreground whitespace-nowrap">
+                      {tr('diagnostics.pagination.pageSize')}
+                    </label>
+                    <input
+                      id="diagnostics-recent-page-size"
+                      type="number"
+                      min={MIN_RECENT_PAGE_SIZE}
+                      max={MAX_RECENT_PAGE_SIZE}
+                      value={recentPageSizeInput}
+                      onChange={(event) => setRecentPageSizeInput(event.target.value)}
+                      onBlur={() => applyRecentPageSize(recentPageSizeInput)}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter') return;
+                        event.preventDefault();
+                        applyRecentPageSize(recentPageSizeInput);
+                      }}
+                      className="w-20 bg-secondary/50 border border-input rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                      aria-label={tr('diagnostics.pagination.pageSize')}
+                    />
+                  </div>
                 </div>
 
                 {filteredRows.length === 0 ? (
                   <p className="px-4 py-8 text-sm text-muted-foreground">{tr('diagnostics.recent.empty')}</p>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-left border-b border-border/70">
-                          <th className="px-4 py-2 font-medium">{tr('diagnostics.recent.time')}</th>
-                          <th className="px-4 py-2 font-medium">{tr('diagnostics.recent.card')}</th>
-                          <th className="px-4 py-2 font-medium">{tr('diagnostics.recent.status')}</th>
-                          <th className="px-4 py-2 font-medium">{tr('diagnostics.recent.duration')}</th>
-                          <th className="px-4 py-2 font-medium">{tr('diagnostics.recent.exitCode')}</th>
-                          <th className="px-4 py-2 font-medium">{tr('diagnostics.recent.error')}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredRows.map((row) => {
-                          const status: 'success' | 'failed' | 'timeout' = row.ok
-                            ? 'success'
-                            : row.timed_out
-                              ? 'timeout'
-                              : 'failed';
-                          const statusLabel =
-                            status === 'success'
-                              ? tr('diagnostics.status.success')
-                              : status === 'timeout'
-                                ? tr('diagnostics.status.timeout')
-                                : tr('diagnostics.status.failed');
+                  <div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-left border-b border-border/70">
+                            <th className="px-4 py-2 font-medium">{tr('diagnostics.recent.time')}</th>
+                            <th className="px-4 py-2 font-medium">{tr('diagnostics.recent.card')}</th>
+                            <th className="px-4 py-2 font-medium">{tr('diagnostics.recent.status')}</th>
+                            <th className="px-4 py-2 font-medium">{tr('diagnostics.recent.duration')}</th>
+                            <th className="px-4 py-2 font-medium">{tr('diagnostics.recent.exitCode')}</th>
+                            <th className="px-4 py-2 font-medium">{tr('diagnostics.recent.error')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {pagedRecentRows.map((row) => {
+                            const status: 'success' | 'failed' | 'timeout' = row.ok
+                              ? 'success'
+                              : row.timed_out
+                                ? 'timeout'
+                                : 'failed';
+                            const statusLabel =
+                              status === 'success'
+                                ? tr('diagnostics.status.success')
+                                : status === 'timeout'
+                                  ? tr('diagnostics.status.timeout')
+                                  : tr('diagnostics.status.failed');
 
-                          return (
-                            <tr
-                              key={`${row.card_id}-${row.executed_at}-${row.duration_ms}`}
-                              className="border-b border-border/40"
-                            >
-                              <td className="px-4 py-2 whitespace-nowrap">{dateFormatter.format(row.executed_at)}</td>
-                              <td className="px-4 py-2">
-                                <div>{row.card_title}</div>
-                                <div className="text-xs text-muted-foreground">{row.card_group}</div>
-                              </td>
-                              <td className="px-4 py-2">
-                                <DiagnosticsStatusBadge status={status} label={statusLabel} />
-                              </td>
-                              <td className="px-4 py-2 whitespace-nowrap">{formatDuration(row.duration_ms)}</td>
-                              <td className="px-4 py-2 whitespace-nowrap">
-                                {row.exit_code === null ? '--' : row.exit_code}
-                              </td>
-                              <td className="px-4 py-2">{row.error_summary ?? '--'}</td>
-                            </tr>
-                          );
+                            return (
+                              <tr
+                                key={`${row.card_id}-${row.executed_at}-${row.duration_ms}`}
+                                className="border-b border-border/40"
+                              >
+                                <td className="px-4 py-2 whitespace-nowrap">{dateFormatter.format(row.executed_at)}</td>
+                                <td className="px-4 py-2">
+                                  <div>{row.card_title}</div>
+                                  <div className="text-xs text-muted-foreground">{row.card_group}</div>
+                                </td>
+                                <td className="px-4 py-2">
+                                  <DiagnosticsStatusBadge status={status} label={statusLabel} />
+                                </td>
+                                <td className="px-4 py-2 whitespace-nowrap">{formatDuration(row.duration_ms)}</td>
+                                <td className="px-4 py-2 whitespace-nowrap">
+                                  {row.exit_code === null ? '--' : row.exit_code}
+                                </td>
+                                <td className="px-4 py-2">{row.error_summary ?? '--'}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="flex flex-col gap-2 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-xs text-muted-foreground">
+                        {tr('diagnostics.pagination.range', {
+                          from: recentRangeStart,
+                          to: recentRangeEnd,
+                          total: filteredRows.length,
                         })}
-                      </tbody>
-                    </table>
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setRecentPage((value) => Math.max(1, value - 1))}
+                          disabled={currentRecentPage <= 1}
+                        >
+                          {tr('diagnostics.pagination.prev')}
+                        </Button>
+                        <span className="text-sm text-muted-foreground">
+                          {tr('diagnostics.pagination.pageInfo', { page: currentRecentPage, total: recentTotalPages })}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setRecentPage((value) => Math.min(recentTotalPages, value + 1))}
+                          disabled={currentRecentPage >= recentTotalPages}
+                        >
+                          {tr('diagnostics.pagination.next')}
+                        </Button>
+                      </div>
+                    </div>
                   </div>
                 )}
               </section>

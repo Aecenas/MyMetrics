@@ -88,7 +88,7 @@ interface ScriptValidationState {
   resolvedPython?: string;
 }
 
-type ValidationAnchor = 'title' | null;
+type ValidationAnchor = 'title' | 'scriptPath' | null;
 
 const defaultForm: WizardForm = {
   title: '',
@@ -495,11 +495,11 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
 
     if (targetStep === 2) {
       if (!form.scriptPath.trim()) {
-        setValidationError(tr('wizard.validation.scriptPathRequired'));
+        setValidationError(tr('wizard.validation.scriptPathRequired'), 'scriptPath');
         return false;
       }
       if (!form.scriptPath.trim().endsWith('.py')) {
-        setValidationError(tr('wizard.validation.scriptExt'));
+        setValidationError(tr('wizard.validation.scriptExt'), 'scriptPath');
         return false;
       }
       if (form.intervalSec < 0) {
@@ -1063,12 +1063,26 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
             className="flex-1 bg-secondary/50 border border-input rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
             placeholder={tr('wizard.pythonScriptPlaceholder')}
             value={form.scriptPath}
-            onChange={(event) => updateForm('scriptPath', event.target.value)}
+            onChange={(event) => {
+              const nextScriptPath = event.target.value;
+              updateForm('scriptPath', nextScriptPath);
+              if (validationAnchor === 'scriptPath') {
+                clearValidationError();
+              }
+            }}
           />
           <Button variant="secondary" onClick={browseScriptFile}>
             <FolderOpen size={14} className="mr-2" /> {tr('wizard.browse')}
           </Button>
         </div>
+        {validationAnchor === 'scriptPath' && validationMessage && (
+          <div
+            className="rounded-md border border-red-500/40 bg-red-500/15 px-3 py-2 text-sm font-semibold text-red-600"
+            role="alert"
+          >
+            {validationMessage}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-4">
@@ -1637,7 +1651,9 @@ export const CreationWizard: React.FC<CreationWizardProps> = ({ onClose, editing
           {step === 4 && renderStepFour()}
           {step === 5 && renderStepFive()}
 
-          {validationMessage && !(step === 1 && validationAnchor === 'title') && (
+          {validationMessage &&
+            !(step === 1 && validationAnchor === 'title') &&
+            !(step === 2 && validationAnchor === 'scriptPath') && (
             <div className="mt-4 rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
               {validationMessage}
             </div>

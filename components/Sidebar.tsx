@@ -6,7 +6,6 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-  Activity,
   ActivitySquare,
   FolderTree,
 } from 'lucide-react';
@@ -16,6 +15,14 @@ import { ViewMode } from '../types';
 export const Sidebar = () => {
   const { currentView, setView, sidebarOpen, toggleSidebar, language } = useStore();
   const tr = (key: string) => t(language, key);
+  const brandIcon = (
+    <img
+      src="/app-icon.png"
+      alt="MyMetrics Icon"
+      className="h-8 w-8 rounded-md object-cover shadow-sm"
+      draggable={false}
+    />
+  );
 
   const menuItems: Array<{ id: ViewMode; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }> = [
     { id: 'dashboard', label: tr('sidebar.dashboard'), icon: LayoutDashboard },
@@ -36,15 +43,11 @@ export const Sidebar = () => {
       <div className="h-16 flex items-center justify-center border-b border-border">
         {sidebarOpen ? (
           <div className="flex items-center gap-2 font-bold text-xl tracking-tight">
-            <div className="p-1 bg-primary rounded text-background">
-              <Activity size={20} />
-            </div>
+            {brandIcon}
             <span>MyMetrics</span>
           </div>
         ) : (
-          <div className="p-1 bg-primary rounded text-background">
-             <Activity size={20} />
-          </div>
+          brandIcon
         )}
       </div>
 
