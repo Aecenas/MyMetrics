@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version" src="https://img.shields.io/badge/version-v1.0.0-1f6feb?style=for-the-badge" />
+  <img alt="Version" src="https://img.shields.io/badge/version-v1.1.0-1f6feb?style=for-the-badge" />
   <img alt="Schema" src="https://img.shields.io/badge/schema-v8-f59e0b?style=for-the-badge" />
   <img alt="Tauri" src="https://img.shields.io/badge/Tauri-v2-24C8DB?style=for-the-badge&logo=tauri&logoColor=white" />
   <img alt="React" src="https://img.shields.io/badge/React-19-149ECA?style=for-the-badge&logo=react&logoColor=white" />
@@ -43,6 +43,7 @@
 - **高度可定制**：每张卡片绑定任意本地 Python 脚本，支持独立解释器、参数与映射。
 - **完整运行闭环**：刷新队列、失败回退、执行诊断、阈值/状态告警、桌面通知、备份轮转。
 - **面向扩展**：数据 schema 版本迁移、导入导出、分组批处理、布局多作用域（全局/分组）。
+- **发布稳定样式**：桌面构建产物内置 Tailwind 样式，不依赖运行时 CDN 注入。
 
 <a id="features"></a>
 ## 🧭 功能全景
@@ -125,6 +126,8 @@ npm run test -- --run
 npm run build
 npm run tauri:build
 ```
+
+说明：发布构建会将前端样式一并打包到本地资源中，避免因运行环境网络/CSP 差异导致样式丢失。
 
 <a id="data-contract"></a>
 ## 🧪 脚本协议（Data Contract）
